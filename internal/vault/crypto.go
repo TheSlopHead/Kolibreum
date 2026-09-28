@@ -18,6 +18,16 @@ func generateRandomBytes(n int) ([]byte, error) {
 	return b, nil
 }
 
+func generateRandomMasterKey() ([]byte, error) {
+	masterkeySize := 32
+	b := make([]byte, masterkeySize)
+	_, err := io.ReadFull(rand.Reader, b)
+	if err != nil {
+		return nil, fmt.Errorf("MasterKey generation error: %v", err)
+	}
+	return b, nil
+}
+
 func DefaultKDF() (KDF, error) {
 	salt, err := generateRandomBytes(32)
 	if err != nil {
