@@ -28,11 +28,8 @@ func CreateVault(vaulthPath string, password []byte) (*Vault, error) {
 	if err == nil {
 		return nil, fmt.Errorf("vault.json exists at path: %s", vaulthPath)
 	}
-	if err != nil {
-		if !os.IsNotExist(err) {
-		} else {
-			return nil, fmt.Errorf("file error: %v", err)
-		}
+	if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("file error: %v", err)
 	}
 
 	err = os.MkdirAll(filepath.Join(vaulthPath, "objects"), 0700)
@@ -55,6 +52,9 @@ func CreateVault(vaulthPath string, password []byte) (*Vault, error) {
 	}
 	wrappingKey := deriveKey(password, kdf)
 	keyNonce, wrappedMasterKey, err := encrypt(wrappingKey, masterKey, []byte(vaultID.String()))
+	if err != nil {
+		return nil, fmt.Errorf("Encryprion error: %v", err)
+	}
 	header := Header{
 		Version:          1,
 		VaultID:          vaultID,
@@ -63,7 +63,13 @@ func CreateVault(vaulthPath string, password []byte) (*Vault, error) {
 		KeyNonce:         keyNonce,
 	}
 	data, err := json.MarshalIndent(header, "", "  ")
-	os.WriteFile(jsonPath, data, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("marshallindent error: %v", err)
+	}
+	err = os.WriteFile(jsonPath, data, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("failed to write vault.json: %v", err)
+	}
 	return &Vault{
 		path:      vaulthPath,
 		header:    header,
