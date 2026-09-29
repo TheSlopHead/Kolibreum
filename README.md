@@ -1,4 +1,4 @@
-# Kolibreum
+# Shelfizdat
 
 > **"Your library remains yours."**  
 > Local-first encrypted archive. Backups and data portability strictly on your command. Zero clouds, zero telemetry, zero accounts.
@@ -11,9 +11,9 @@
 
 ## Overview
 
-**Kolibreum** is a fast, robust desktop application for Linux designed to store, organize, and read your personal book collection with an uncompromising stance on privacy, longevity, and data ownership.
+**Shelfizdat** is a fast, robust desktop application for Linux designed to store, organize, and read your personal book collection with an uncompromising stance on privacy, longevity, and data ownership.
 
-Unlike cloud-dependent reading platforms and proprietary reader ecosystems, Kolibreum ensures that you retain full physical and cryptographic control over your digital library. Even if your OS is reinstalled, an online service shuts down, or network connectivity is completely severed, your books remain securely stored, organized, and reproducibly recoverable.
+Unlike cloud-dependent reading platforms and proprietary reader ecosystems, Shelfizdat ensures that you retain full physical and cryptographic control over your digital library. Even if your OS is reinstalled, an online service shuts down, or network connectivity is completely severed, your books remain securely stored, organized, and reproducibly recoverable.
 
 ### Core Principles
 
@@ -70,7 +70,7 @@ vault/
 ## Repository Layout
 
 ```text
-Kolibreum/
+Shelfizdat/
 ├── cmd/
 │   ├── app/              # Wails desktop application entrypoint
 │   └── vaultctl/         # Standalone CLI tool for verification and recovery
