@@ -7,6 +7,7 @@ import (
 
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/chacha20poly1305"
+	"golang.org/x/crypto/hkdf"
 )
 
 func generateRandomBytes(n int) ([]byte, error) {
@@ -71,4 +72,11 @@ func decrypt(key []byte, nonce []byte, ciphertext []byte, additionalData []byte)
 		return nil, fmt.Errorf("decryption error: %v", err)
 	}
 	return plainText, nil
+}
+
+func deriveObjectKey(masterkey []byte, vaultID string, objectID string) ([]byte, error) {
+	info := []byte("mut:object" + objectID)
+	salt := vaultID
+
+	kdf := hkdf.New()
 }
