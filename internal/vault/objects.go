@@ -36,3 +36,34 @@ func (v *Vault) PutObject(data []byte) (objectID string, err error) {
 	}
 	return objectID, nil
 }
+
+func (v *Vault) GetObject(objectID string) ([]byte, error) {
+	if len(objectID) < 2 {
+		return nil, fmt.Errorf("lenght of objectID less than 2")
+	}
+	if v.isLocked {
+		return nil, ErrVaultLocked
+	}
+	objectPath := filepath.Join(v.path, "objects", objectID[:2], objectID)
+	payload, err := os.ReadFile(objectPath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read file: %v", err)
+	}
+	if len(payload) < 40 {
+		return nil, fmt.Errorf("invalin lenght of object: %v", err)
+	}
+	nonce := payload[:24]
+	ciphertext := payload[24:]
+
+	objectKey, err := deriveObjectKey(v.masterKey, v.header.VaultID.String(), objectID)
+	if err != nil {
+		return nil, fmt.Errorf("derive key error: %v", err)
+	}
+
+	data, err := decrypt(objectKey, nonce, ciphertext, []byte(objectID))
+	if err != nil {
+		return nil, fmt.Errorf("decryption error: %v", err)
+	}
+
+	return data, nil
+}
