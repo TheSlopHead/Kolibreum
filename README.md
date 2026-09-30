@@ -1,122 +1,92 @@
-# Mut Reader
+# mut
 
-> **"Your library remains yours."**  
-> Local-first encrypted archive. Backups and data portability strictly on your command. Zero clouds, zero telemetry, zero accounts.
+**A personal library. A quiet place to read. An archive you own.**
 
-[![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-blue.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Go Version](https://img.shields.io/badge/Go-1.27+-00ADD8?logo=go)](https://go.dev/)
-[![Platform](https://img.shields.io/badge/Platform-Linux-orange?logo=linux)](https://ubuntu.com)
+mut is a Linux desktop reader being built around a simple idea: your books should stay with you. Keep your collection in a local encrypted archive, organize it into shelves, and pick up where you left off. Backups, exports, and transfers happen on your terms.
 
----
+> Your library remains yours.
 
-## Overview
+Designed to work offline, without accounts or telemetry. Built first for the author and a small circle of friends, with careful attention to reading, data ownership, and long-term recovery.
 
-**Mut Reader** is a fast, robust desktop application for Linux designed to store, organize, and read your personal book collection with an uncompromising stance on privacy, longevity, and data ownership.
+## Project status
 
-Unlike cloud-dependent reading platforms and proprietary reader ecosystems, Mut Reader ensures that you retain full physical and cryptographic control over your digital library. Even if your OS is reinstalled, an online service shuts down, or network connectivity is completely severed, your books remain securely stored, organized, and reproducibly recoverable.
+mut is an early prototype. This repository currently contains the project specifications and a Go vault package with code for creating, unlocking, and locking a vault, storing encrypted objects, and reading them back, alongside tests.
 
-### Core Principles
+The desktop interface, book catalog, reading adapters, backups, and recovery CLI are planned. The features below describe the intended first release. The archive format is still under development; recovery testing and independent security review are required before a public release with data protection claims.
 
-- **100% Offline & Zero-Telemetry:** No background telemetry, no remote analytics, and no accounts or credentials sent over the network.
-- **Encrypted at Rest:** Book files, cover art, titles, authors, shelves, notes, and reading progress are always encrypted on disk. When locked, the vault discloses zero book metadata.
-- **Format-Agnostic Storage:** Store files of **any format** inside the vault. They are safely encrypted, deduplicated by byte content hash, and included in disaster-recovery backups.
-- **Built-in Reading Adapters:** Native in-app reading experience for **PDF**, **EPUB**, and **FB2** in version 1. Other formats can be cleanly exported or launched via external system viewers.
-- **Independent Disaster Recovery:** Data preservation is designed to outlive the application itself. An autonomous CLI tool (`vaultctl`) enables verifying and restoring library archives without launching the GUI.
+## The first release
 
----
+- **Keep the whole collection.** Import files of any format. Read PDF, EPUB, and FB2 inside mut; keep other formats in the archive and export them for an external viewer.
+- **Find your next book.** Shelves, covers, title and author search, and filters for books in progress or finished.
+- **Read comfortably.** A calm reading view with a table of contents, bookmarks, saved positions, keyboard navigation, and light and dark themes. Adjustable text for EPUB and FB2; page zoom for PDF.
+- **Lock the library.** Book contents, titles, covers, notes, and reading progress are intended to remain encrypted on disk when the vault is locked.
+- **Make a copy you can trust.** Encrypted backups, integrity reports, and restoration on a clean machine. A standalone `vaultctl` utility is planned for verification and recovery without the desktop app.
+- **Take your originals with you.** Export the files you imported, without tying them to the library's internal format.
 
-## Architecture & Technology Stack
+Storage and reading are separate: a missing reading adapter should never prevent a file from being preserved.
+
+## Under the hood
+
+The planned architecture keeps the desktop interface separate from the storage core. The application and recovery CLI will share the same Go packages.
 
 ```mermaid
 flowchart TD
-    UI["Svelte UI (TypeScript + Vite)"] --> API["Narrow Wails IPC Bridge"]
-    API --> Domain["Go Core (Catalog, Workflows)"]
-    Domain --> Vault["Encrypted Vault (XChaCha20-Poly1305 + Argon2id)"]
-    Domain --> Readers["Reader Adapters (PDF.js, epub.js, FB2 parser)"]
-    Domain --> Backup["Snapshots & Disaster Recovery (vaultctl)"]
+    UI["Svelte · TypeScript · Vite"] --> Bridge["Wails v2"]
+    Bridge --> Core["Go: catalog and workflows"]
+    Core --> Vault["Encrypted archive"]
+    Core --> Readers["PDF · EPUB · FB2"]
+    Core --> Backup["Backup and recovery"]
+    CLI["vaultctl"] --> Vault
+    CLI --> Backup
 ```
 
-- **Core & CLI:** [Go](https://go.dev/) — pure packages without GUI dependencies located in `internal/`, accompanied by an independent `cmd/vaultctl` CLI.
-- **Desktop Shell:** [Wails v2](https://v2.wails.io/) — lightweight native desktop integration via WebKitGTK without the overhead of Electron.
-- **Frontend:** [Svelte](https://svelte.dev/) + [TypeScript](https://www.typescriptlang.org/) + [Vite](https://vitejs.dev/) — streamlined UI token system, list virtualization, keyboard-first navigation, and light/dark theme support.
-- **Cryptography:**
-  - **KDF:** `Argon2id` for deriving key-wrapping keys from passphrases.
-  - **AEAD:** `XChaCha20-Poly1305` for authenticated encryption with associated data (AAD).
-  - **Entropy:** Cryptographically secure random generator (`crypto/rand`).
-- **Reader Engines:**
-  - **PDF:** PDF.js (streaming byte-range reader to keep memory footprint bounded).
-  - **EPUB:** epub.js in an isolated sandbox with scripts and external navigation strictly disabled.
-  - **FB2:** Native streaming Go parser based on `encoding/xml` emitting sanitized HTML without invoking external C libraries.
+The vault prototype uses **Argon2id** and **XChaCha20-Poly1305** from `golang.org/x/crypto`, with **HKDF** for object keys. The storage design calls for encrypted content and metadata, an in-memory search index after unlocking, and catalog snapshots committed through an atomic `HEAD` update.
 
----
+The planned reading engines are PDF.js, epub.js as the EPUB candidate, and a streaming FB2 parser written in Go. Interface assets and reader resources will ship with the application; book scripts and external requests are to be disabled.
 
-## Vault Structure (`vault/`)
-
-The repository uses a snapshot-based content-addressable model:
-
-```text
-vault/
-├── vault.json            # Public header: format version, vault UUID, salt, KDF parameters,
-│                         # wrapped master key (no book titles or secrets)
-├── HEAD                  # Points to the latest valid snapshot ID (atomic commit)
-├── objects/              # Encrypted blob objects (content, covers, notes)
-│   └── ab/<random-id>
-└── snapshots/            # Encrypted catalog trees (books, shelves, reading states)
-    └── <snapshot-id>
-```
-
----
-
-## Repository Layout
-
-```text
-Mut/
-├── cmd/
-│   ├── app/              # Wails desktop application entrypoint
-│   └── vaultctl/         # Standalone CLI tool for verification and recovery
-├── docs/                 # Architectural Decision Records & Specs
-│   ├── ARCHITECTURE.md   # Architectural boundaries, protocols, and data specs
-│   ├── Bookreader.md     # Project scope, boundary rules, and non-goals
-│   ├── PRODUCT.md        # User workflows, UI/UX specification, and design tokens
-│   ├── ROADMAP.md        # Phased milestones (Phase 0 to 4) & Definition of Done
-│   └── SECURITY.md       # Threat model, cryptographic target, and parser limits
-├── internal/
-│   ├── backup/           # Backup generation, verification, and restoration
-│   ├── catalog/          # Catalog state, shelf management, and in-memory indexing
-│   ├── importer/         # Format parsers and input boundary limits
-│   ├── reader/           # Modular reader adapters
-│   └── vault/            # Cryptographic primitives, storage objects, transactions
-├── frontend/             # Svelte + TypeScript web app assets
-├── go.mod
-└── README.md
-```
-
----
+See the [architecture](docs/ARCHITECTURE.md) and [security model](docs/SECURITY.md) for the design, boundaries, and review requirements.
 
 ## Documentation
 
-Full architectural decisions and design specifications are maintained in the [`docs/`](docs/) directory:
+The detailed specifications are written in Russian.
 
-1. [docs/PRODUCT.md](docs/PRODUCT.md) — User personas, key workflows, UI design tokens, and non-commercial project principles.
-2. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Technical stack, storage schema, component boundaries, and reader architecture.
-3. [docs/SECURITY.md](docs/SECURITY.md) — Threat model, security boundaries, cryptographic contracts, and parser fuzzing requirements.
-4. [docs/ROADMAP.md](docs/ROADMAP.md) — Delivery phases (Phase 0 through 4), acceptance milestones, and Definition of Done.
+| Document | Contents |
+| --- | --- |
+| [Project brief](docs/Bookreader.md) | The idea, core decisions, and scope of the first release |
+| [Product and interface](docs/PRODUCT.md) | User workflows, navigation, and visual design |
+| [Architecture](docs/ARCHITECTURE.md) | Stack, component boundaries, archive design, and contracts |
+| [Security](docs/SECURITY.md) | Threat model, key handling, and required checks |
+| [Roadmap](docs/ROADMAP.md) | Milestones from prototype to beta and acceptance criteria |
 
----
+Start with the project brief, then follow the product, architecture, security, and roadmap documents.
 
-## Development Prerequisites (Linux)
+## Repository
 
-- **Operating System:** Ubuntu 22.04+ LTS / Debian 12+ / Fedora 39+
-- **Go:** 1.23+ (or 1.27+ as specified in `go.mod`)
-- **Node.js:** LTS (v18+ or v20+) & npm / pnpm
-- **System Packages:**
-  - `libgtk-3-dev`
-  - `libwebkit2gtk-4.0-dev` (or `libwebkit2gtk-4.1-dev`)
-  - `build-essential` / `gcc`
-- **Wails CLI:** `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+```text
+.
+├── docs/              # project decisions and specifications
+├── internal/vault/    # encrypted storage prototype and tests
+├── pictures/          # project artwork
+├── references/        # visual references
+├── go.mod
+├── go.sum
+└── README.md
+```
 
----
+The Go version declared in `go.mod` is **1.27.1**. To run the core tests:
+
+```sh
+go test ./...
+```
+
+Desktop setup instructions will be added with the Wails application and frontend scaffold.
+
+## What's next
+
+The first milestone is a complete, verifiable round trip: create a vault → store files → close and reopen → back up → restore into a new directory → compare the original bytes. The reading interface, shelves, and larger collections follow that foundation.
+
+Later ideas include sharing book lists and personal notes, selected encrypted packages for specific recipients, and local search with citations. Their scope is documented separately in the roadmap.
 
 ## License
 
-This project is licensed under the [Mozilla Public License 2.0 (MPL-2.0)](LICENSE).
+**MPL-2.0** is the proposed license. A license file has not yet been added; the final choice and dependency licenses must be reviewed before the first public release.
