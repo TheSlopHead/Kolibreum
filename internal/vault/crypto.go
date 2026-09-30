@@ -2,6 +2,7 @@ package vault
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"io"
 
@@ -76,7 +77,15 @@ func decrypt(key []byte, nonce []byte, ciphertext []byte, additionalData []byte)
 
 func deriveObjectKey(masterkey []byte, vaultID string, objectID string) ([]byte, error) {
 	info := []byte("mut:object" + objectID)
-	salt := vaultID
+	salt := []byte(vaultID)
 
-	kdf := hkdf.New()
+	kdfReader := hkdf.New(sha256.New, masterkey, salt, info)
+
+	objectKey := make([]byte, 32)
+	_, err := io.ReadFull(kdfReader, objectKey)
+	if err != nil {
+		return nil, fmt.Errorf("read kdf interface error: %v", err)
+	}
+
+	return objectKey, nil
 }
