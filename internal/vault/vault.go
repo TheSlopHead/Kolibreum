@@ -77,3 +77,42 @@ func CreateVault(vaulthPath string, password []byte) (*Vault, error) {
 		isLocked:  false,
 	}, nil
 }
+
+func OpenVault(vaultpath string, password []byte) (*Vault, error) {
+	if len(vaultpath) < 1 {
+		return nil, fmt.Errorf("vaultpath not valid!")
+	}
+	if len(password) < 8 {
+		return nil, fmt.Errorf("password lenght is less than 8")
+	}
+	jsonpath := filepath.Join(vaultpath, "vault.json")
+	data, err := os.ReadFile(jsonpath)
+	if err != nil {
+		return nil, fmt.Errorf("Vault not found at this path: %v", err)
+	}
+
+	header := Header{}
+	err = json.Unmarshal(data, &header)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshall json error: %v", err)
+	}
+
+	wrappingkey := deriveKey(password, header.KDF)
+	masterKey, err := decrypt(wrappingkey, header.KeyNonce, header.WrappedMasterKey, []byte(header.VaultID.String()))
+	if err != nil {
+		return nil, fmt.Errorf("Invalid password or corrupdet vault: %v", err)
+	}
+
+	return &Vault{
+		path:      vaultpath,
+		header:    header,
+		masterKey: masterKey,
+		isLocked:  false,
+	}, nil
+}
+
+func (v *Vault) Lock() {
+	v.isLocked = true
+	clear(v.masterKey)
+	v.masterKey = nil
+}
