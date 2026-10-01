@@ -12,6 +12,8 @@ Designed to work offline, without accounts or telemetry. Built first for the aut
 
 mut is an early prototype. This repository currently contains the project specifications and a Go vault package with code for creating, unlocking, and locking a vault, storing encrypted objects, and reading them back, alongside tests.
 
+An Android Flutter implementation lives in [`mobile/`](mobile/README.md), with its own [architecture](mobile/docs/ARCHITECTURE.md) and UI based on the Paper mobile layouts. It includes encrypted storage, readers, shelves and backup/restore; its prototype limits and validation are documented there.
+
 The desktop interface, book catalog, reading adapters, backups, and recovery CLI are planned. The features below describe the intended first release. The archive format is still under development; recovery testing and independent security review are required before a public release with data protection claims.
 
 ## The first release
@@ -66,6 +68,7 @@ Start with the project brief, then follow the product, architecture, security, a
 .
 ├── docs/              # project decisions and specifications
 ├── internal/vault/    # encrypted storage prototype and tests
+├── mobile/            # Flutter Android app, architecture and tests
 ├── pictures/          # project artwork
 ├── references/        # visual references
 ├── go.mod
