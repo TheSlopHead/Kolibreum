@@ -107,6 +107,8 @@ class TestRepository implements LibraryRepository {
 
 class TestDocuments implements Documents {
   @override
+  Future<void> cancel() async {}
+  @override
   Future<PickedDocument?> pick({bool backup = false}) async => null;
   @override
   Future<bool> save(
