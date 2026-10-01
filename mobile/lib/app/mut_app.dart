@@ -49,6 +49,7 @@ class _LibraryShellState extends State<LibraryShell>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    controller.documents = widget.documents;
     controller.addListener(_state);
     AndroidDocuments.channel.setMethodCallHandler((call) async {
       if (call.method == 'background') await controller.lock();
@@ -166,6 +167,7 @@ class _LibraryShellState extends State<LibraryShell>
     }
   });
   Future<void> _export(Book book) => _run(() async {
+    final generation = controller.sessionGeneration;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -185,11 +187,11 @@ class _LibraryShellState extends State<LibraryShell>
         ],
       ),
     );
-    if (confirmed != true) return;
+    if (confirmed != true || !controller.isCurrentSession(generation)) return;
     await controller.task(() async {
       final bytes = await controller.repository.read(book.id);
       try {
-        if (controller.status != LibraryStatus.unlocked) return;
+        if (!controller.isCurrentSession(generation)) return;
         await _documents(
           () => widget.documents.save(
             '${book.title}.${book.format.toLowerCase()}',
@@ -203,8 +205,9 @@ class _LibraryShellState extends State<LibraryShell>
   });
   Future<void> _backup() => _run(
     () => controller.task(() async {
+      final generation = controller.sessionGeneration;
       final bytes = await controller.repository.backup();
-      if (controller.status != LibraryStatus.unlocked) return;
+      if (!controller.isCurrentSession(generation)) return;
       final saved = await _documents(
         () => widget.documents.save(
           'mut-backup-${DateTime.now().toIso8601String().substring(0, 10)}.zip',
@@ -212,7 +215,7 @@ class _LibraryShellState extends State<LibraryShell>
           verify: true,
         ),
       );
-      if (saved && mounted && controller.status == LibraryStatus.unlocked) {
+      if (saved && mounted && controller.isCurrentSession(generation)) {
         controller.backupReport =
             '${controller.books.length} books · saved and reread successfully';
         setState(() {});
