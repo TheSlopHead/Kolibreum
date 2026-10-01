@@ -1,0 +1,10 @@
+<resources>
+    <style name="LaunchTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowSplashScreenBackground">@color/mut_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/mut_foreground</item>
+        <item name="android:windowBackground">@color/mut_background</item>
+        <item name="android:statusBarColor">@color/mut_background</item>
+        <item name="android:navigationBarColor">@color/mut_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
