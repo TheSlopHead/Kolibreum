@@ -16,6 +16,40 @@ Uint8List zip(Map<String, String> files) {
 }
 
 void main() {
+  test('SEC-03: text budget applies across EPUB chapters', () {
+    final data = zip({
+      'META-INF/container.xml':
+          '<container><rootfile full-path="book.opf"/></container>',
+      'book.opf':
+          '<package><manifest>${List.generate(3, (i) => '<item id="c$i" href="c$i.xhtml" media-type="application/xhtml+xml"/>').join()}</manifest><spine>${List.generate(3, (i) => '<itemref idref="c$i"/>').join()}</spine></package>',
+      for (int i = 0; i < 3; i++)
+        'c$i.xhtml':
+            '<html><body><p>${'a' * (6 * 1024 * 1024)}</p></body></html>',
+    });
+    expect(
+      () => decodeBook(data, 'EPUB', 'audit'),
+      throwsA(isA<LibraryFailure>().having((e) => e.code, 'code', 'limit')),
+    );
+  });
+
+  test(
+    'SEC-03: nested sections and paragraphs retain text once and in order',
+    () {
+      final data = Uint8List.fromList(
+        utf8.encode(
+          '<FictionBook><body><section><title><p>Title</p></title>'
+          '<p>Before <p>nested</p> after</p>'
+          '<section><p>Child</p></section><p>Last</p>'
+          '</section></body></FictionBook>',
+        ),
+      );
+      expect(decodeBook(data, 'FB2', 'audit').chapters.single.paragraphs, [
+        'Before nested after',
+        'Child',
+        'Last',
+      ]);
+    },
+  );
   test('FB2 metadata and chapters use text only', () {
     final bytes = Uint8List.fromList(
       utf8.encode(
