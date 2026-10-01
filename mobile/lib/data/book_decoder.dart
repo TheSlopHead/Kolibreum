@@ -34,19 +34,54 @@ XmlDocument _xml(String text) {
 
 Iterable<XmlElement> _elements(XmlNode node, String name) =>
     node.descendants.whereType<XmlElement>().where((e) => e.name.local == name);
-String _text(XmlNode node) {
-  if (node is XmlText) return node.value;
-  if (node is XmlElement &&
-      const [
-        'script',
-        'style',
-        'iframe',
-        'object',
-        'binary',
-      ].contains(node.name.local)) {
-    return '';
+const _maxBookText = 16 * 1024 * 1024;
+
+String _text(XmlNode node, {int maximum = _maxBookText}) {
+  final buffer = StringBuffer();
+  int length = 0;
+  void visit(XmlNode node) {
+    if (node is XmlText) {
+      length += node.value.length;
+      if (length > maximum) {
+        throw const LibraryFailure(
+          'limit',
+          'Book text exceeds supported limits.',
+        );
+      }
+      buffer.write(node.value);
+      return;
+    }
+    if (node is XmlElement &&
+        const [
+          'script',
+          'style',
+          'iframe',
+          'object',
+          'binary',
+        ].contains(node.name.local)) {
+      return;
+    }
+    for (final child in node.children) {
+      visit(child);
+    }
   }
-  return node.children.map(_text).join();
+
+  visit(node);
+  return buffer.toString();
+}
+
+class _TextBudget {
+  int remaining = _maxBookText;
+
+  List<String> paragraphs(Iterable<XmlElement> elements) {
+    final result = <String>[];
+    for (final element in elements) {
+      final text = _text(element, maximum: remaining).trim();
+      remaining -= text.length;
+      if (text.isNotEmpty) result.add(text);
+    }
+    return result;
+  }
 }
 
 String _first(XmlNode node, String tag) =>
@@ -69,6 +104,7 @@ ReaderDocument decodeBook(Uint8List bytes, String format, String fallback) {
 }
 
 ReaderDocument _decodeBook(Uint8List bytes, String format, String fallback) {
+  final budget = _TextBudget();
   if (format == 'FB2') {
     final xml = _xml(utf8.decode(bytes));
     final body = _elements(xml, 'body').firstOrNull;
@@ -82,16 +118,20 @@ ReaderDocument _decodeBook(Uint8List bytes, String format, String fallback) {
         .toList();
     for (final (i, section) in (sections.isEmpty ? [body] : sections).indexed) {
       final title = _first(section, 'title');
-      final paragraphs = _elements(section, 'p')
-          .where(
-            (e) => !e.ancestors.whereType<XmlElement>().any(
-              (a) => a.name.local == 'title',
+      final paragraphs = budget.paragraphs(
+        _elements(section, 'p')
+            .where(
+              (e) => !e.ancestors.whereType<XmlElement>().any(
+                (a) => a.name.local == 'title',
+              ),
+            )
+            .where(
+              (e) => !e.ancestors
+                  .takeWhile((a) => a != section)
+                  .whereType<XmlElement>()
+                  .any((a) => a.name.local == 'p'),
             ),
-          )
-          .map(_text)
-          .map((s) => s.trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
+      );
       if (paragraphs.isNotEmpty) {
         chapters.add(
           ReaderChapter(
@@ -179,21 +219,19 @@ ReaderDocument _decodeBook(Uint8List bytes, String format, String fallback) {
     final chapter = _xml(text);
     final body = _elements(chapter, 'body').firstOrNull;
     if (body == null) continue;
-    final paragraphs = body.descendants
-        .whereType<XmlElement>()
-        .where((e) => const ['p', 'blockquote', 'li'].contains(e.name.local))
-        .where(
-          (e) => !e.ancestors
-              .takeWhile((a) => a != body)
-              .whereType<XmlElement>()
-              .any(
-                (a) => const ['p', 'blockquote', 'li'].contains(a.name.local),
-              ),
-        )
-        .map(_text)
-        .map((s) => s.trim())
-        .where((s) => s.isNotEmpty)
-        .toList();
+    final paragraphs = budget.paragraphs(
+      body.descendants
+          .whereType<XmlElement>()
+          .where((e) => const ['p', 'blockquote', 'li'].contains(e.name.local))
+          .where(
+            (e) => !e.ancestors
+                .takeWhile((a) => a != body)
+                .whereType<XmlElement>()
+                .any(
+                  (a) => const ['p', 'blockquote', 'li'].contains(a.name.local),
+                ),
+          ),
+    );
     final title = [
       'h1',
       'h2',
