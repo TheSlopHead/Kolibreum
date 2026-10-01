@@ -2,12 +2,14 @@ import 'package:flutter/foundation.dart';
 import '../data/book_decoder.dart';
 import '../domain/book.dart';
 import '../domain/library_repository.dart';
+import '../platform/documents.dart';
 
 enum LibraryStatus { loading, absent, locked, unlocked }
 
 class LibraryController extends ChangeNotifier {
-  LibraryController(this.repository);
+  LibraryController(this.repository, {this.documents});
   final LibraryRepository repository;
+  Documents? documents;
   LibraryStatus status = LibraryStatus.loading;
   List<Book> books = [];
   Book? current;
@@ -15,6 +17,9 @@ class LibraryController extends ChangeNotifier {
   Uint8List? pdf;
   bool busy = false;
   int _generation = 0;
+  int get sessionGeneration => _generation;
+  bool isCurrentSession(int generation) =>
+      generation == _generation && status == LibraryStatus.unlocked;
   bool hasArchive = false;
   (String, String, double)? _pendingPosition;
   double fontSize = 18;
@@ -107,6 +112,9 @@ class LibraryController extends ChangeNotifier {
   }
 
   Future<void> lock() async {
+    // Dispatch cancellation before clearing the UI, without delaying Lock in
+    // the worker behind a platform reply.
+    final cancelling = _cancelDocuments();
     final pending = _pendingPosition;
     _generation++;
     closeReader();
@@ -131,6 +139,15 @@ class LibraryController extends ChangeNotifier {
       // A failed save must never prevent locking the archive.
     } finally {
       await locking;
+      await cancelling;
+    }
+  }
+
+  Future<void> _cancelDocuments() async {
+    try {
+      await documents?.cancel();
+    } catch (_) {
+      // A disconnected/destroyed platform must not prevent the vault locking.
     }
   }
 
