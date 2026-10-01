@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:pdfrx/pdfrx.dart';
 import '../app/library_controller.dart';
 import '../domain/book.dart';
 import '../ui/components.dart';
 import '../ui/theme.dart';
 import 'appearance_sheet.dart';
+import 'reader/pdf_reader.dart';
+import 'reader/text_reader.dart';
 
 class ReaderScreen extends StatefulWidget {
   const ReaderScreen({
@@ -20,170 +21,149 @@ class ReaderScreen extends StatefulWidget {
 }
 
 class _ReaderScreenState extends State<ReaderScreen> {
-  late Book book;
-  final scroll = ScrollController();
-  int chapter = 0, page = 1, totalPages = 1;
-  double fraction = 0;
-  bool pdfReady = false;
+  late final Book book = widget.controller.current!;
+  final textReader = GlobalKey<TextReaderState>();
+  final pdfReader = GlobalKey<PdfReaderState>();
+  final position = ValueNotifier<(String, int, int)?>(null);
   Timer? saveTimer;
-  final pdfController = PdfViewerController();
-  @override
-  void initState() {
-    super.initState();
-    book = widget.controller.current!;
-    final locator = book.locator.split(':');
-    if (locator.length == 2 && locator[0] == 'pdf-v1') {
-      page = int.tryParse(locator[1]) ?? 1;
-    }
-    if (locator.length == 3 && locator[0] == 'text-v1') {
-      chapter = (int.tryParse(locator[1]) ?? 0).clamp(
-        0,
-        (widget.controller.document?.chapters.length ?? 1) - 1,
-      );
-      fraction = (double.tryParse(locator[2]) ?? 0).clamp(0, 1);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (scroll.hasClients) {
-          scroll.jumpTo(scroll.position.maxScrollExtent * fraction);
-        }
-      });
-    }
-    scroll.addListener(_scroll);
-    _stage();
-  }
+  bool saving = false;
+  (String, int, int)? savedPosition;
 
-  void _scroll() {
-    if (!scroll.hasClients) return;
-    fraction = scroll.position.maxScrollExtent > 0
-        ? (scroll.offset / scroll.position.maxScrollExtent).clamp(0, 1)
-        : 0;
-    _schedule();
-  }
+  double get progress => position.value == null
+      ? book.progress
+      : position.value!.$2 / position.value!.$3;
 
-  String get locator => widget.controller.pdf != null
-      ? 'pdf-v1:$page'
-      : 'text-v1:$chapter:${fraction.toStringAsFixed(5)}';
-  double get progress => widget.controller.pdf != null
-      ? page / totalPages
-      : (chapter + fraction) /
-            (widget.controller.document?.chapters.length ?? 1);
-  void _schedule() {
-    _stage();
+  void _position(String locator, int page, int total) {
+    final next = (locator, page, total);
+    if (position.value == next) return;
+    position.value = next;
+    widget.controller.stagePosition(book.id, locator, progress);
     saveTimer?.cancel();
     saveTimer = Timer(const Duration(milliseconds: 600), _save);
   }
 
-  void _stage() {
-    if (widget.controller.pdf != null && !pdfReady) return;
-    widget.controller.stagePosition(book.id, locator, progress);
-  }
-
   Future<void> _save() async {
-    if (widget.controller.status != LibraryStatus.unlocked) return;
-    if (widget.controller.pdf != null && !pdfReady) return;
-    try {
-      await widget.controller.position(book.id, locator, progress);
-    } catch (e) {
-      if (mounted) showFailure(context, e);
-    }
-  }
-
-  void _changeChapter(int next) {
-    setState(() {
-      chapter = next;
-      fraction = 0;
-    });
-    if (scroll.hasClients) scroll.jumpTo(0);
-    _schedule();
-  }
-
-  Future<void> _contents() async {
-    final chapters = widget.controller.document?.chapters;
-    if (chapters == null) {
-      final input = TextEditingController(text: '$page');
-      final next = await showDialog<int>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text('Page 1–$totalPages'),
-          content: TextField(
-            controller: input,
-            keyboardType: TextInputType.number,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, int.tryParse(input.text)),
-              child: const Text('Go'),
-            ),
-          ],
-        ),
-      );
-      input.dispose();
-      if (next != null && next >= 1 && next <= totalPages) {
-        await pdfController.goToPage(pageNumber: next);
-      }
+    final current = position.value;
+    if (saving ||
+        current == null ||
+        savedPosition == current ||
+        widget.controller.status != LibraryStatus.unlocked) {
       return;
     }
-    await showModalBottomSheet<void>(
+    saving = true;
+    try {
+      await widget.controller.position(
+        book.id,
+        current.$1,
+        current.$2 / current.$3,
+      );
+      savedPosition = current;
+    } catch (e) {
+      if (mounted) showFailure(context, e);
+    } finally {
+      saving = false;
+      if (mounted && position.value != current) {
+        saveTimer?.cancel();
+        saveTimer = Timer(const Duration(milliseconds: 600), _save);
+      }
+    }
+  }
+
+  Future<void> _goToPage() async {
+    final current = position.value;
+    if (current == null) return;
+    final input = TextEditingController(text: '${current.$2}');
+    final next = await showDialog<int>(
       context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (context) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.sizeOf(context).height * .6,
-          child: ListView(
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                  'Contents & bookmarks',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
-                ),
-              ),
-              for (final (i, c) in chapters.indexed)
-                ListTile(
-                  title: Text(c.title),
-                  selected: i == chapter,
-                  onTap: () {
-                    Navigator.pop(context);
-                    _changeChapter(i);
-                  },
-                ),
-              for (final mark
-                  in (widget.controller.current?.bookmarks ?? <String>[]))
-                ListTile(
-                  leading: const Icon(Icons.bookmark_outline),
-                  title: Text('Bookmark · $mark'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    final pieces = mark.split(':');
-                    if (pieces.length == 3) {
-                      _changeChapter(
-                        (int.tryParse(pieces[1]) ?? 0).clamp(
-                          0,
-                          chapters.length - 1,
-                        ),
-                      );
-                      fraction = (double.tryParse(pieces[2]) ?? 0).clamp(0, 1);
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (scroll.hasClients) {
-                          scroll.jumpTo(
-                            scroll.position.maxScrollExtent * fraction,
-                          );
-                        }
-                      });
-                    }
-                  },
-                ),
-            ],
-          ),
+      builder: (context) => AlertDialog(
+        title: Text('Page 1–${current.$3}'),
+        content: TextField(
+          controller: input,
+          keyboardType: TextInputType.number,
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, int.tryParse(input.text)),
+            child: const Text('Go'),
+          ),
+        ],
       ),
     );
+    input.dispose();
+    if (!mounted || next == null || next < 1 || next > current.$3) return;
+    textReader.currentState?.goToPage(next);
+    await pdfReader.currentState?.goToPage(next);
   }
+
+  String _bookmarkLabel(String mark) {
+    final parts = mark.split(':');
+    if (parts.firstOrNull == 'pdf-v1') return 'Page ${parts.last}';
+    return 'Chapter ${(int.tryParse(parts.elementAtOrNull(1) ?? '') ?? 0) + 1}';
+  }
+
+  Future<void> _contents() => showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (context) => SafeArea(
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * .6,
+        child: ListView(
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'Contents & bookmarks',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.numbers),
+              title: const Text('Go to page'),
+              onTap: () {
+                Navigator.pop(context);
+                _goToPage();
+              },
+            ),
+            for (final (i, chapter)
+                in (widget.controller.document?.chapters ?? <ReaderChapter>[])
+                    .indexed)
+              ListTile(
+                title: Text(chapter.title),
+                onTap: () {
+                  Navigator.pop(context);
+                  textReader.currentState?.goToLocator('text-v2:$i:0');
+                },
+              ),
+            for (final mark
+                in widget.controller.current?.bookmarks ?? <String>[])
+              ListTile(
+                leading: const Icon(Icons.bookmark_outline),
+                title: Text('Bookmark · ${_bookmarkLabel(mark)}'),
+                onTap: () {
+                  Navigator.pop(context);
+                  textReader.currentState?.goToLocator(mark);
+                  if (mark.startsWith('pdf-v1:')) {
+                    pdfReader.currentState?.goToPage(
+                      int.tryParse(mark.split(':').last) ?? 1,
+                    );
+                  }
+                },
+              ),
+          ],
+        ),
+      ),
+    ),
+  );
 
   @override
   void dispose() {
     saveTimer?.cancel();
-    scroll.dispose();
+    position.dispose();
     super.dispose();
   }
 
@@ -206,10 +186,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
               SquareAction(
                 Icons.arrow_back,
                 label: 'Back to book',
-                onPressed: () async {
-                  await _save();
-                  widget.onBack();
-                },
+                onPressed: widget.onBack,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -223,6 +200,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
                     ),
                     Text(
                       current.author,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 12,
                         color: MutColors.muted,
@@ -232,18 +211,26 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 ),
               ),
               const SizedBox(width: 12),
-              SquareAction(
-                current.bookmarks.contains(locator)
-                    ? Icons.bookmark
-                    : Icons.bookmark_outline,
-                label: 'Toggle bookmark',
-                onPressed: () async {
-                  try {
-                    await controller.bookmark(current, locator);
-                  } catch (e) {
-                    if (context.mounted) showFailure(context, e);
-                  }
-                },
+              ValueListenableBuilder(
+                valueListenable: position,
+                builder: (context, value, _) => SquareAction(
+                  current.bookmarks.contains(value?.$1)
+                      ? Icons.bookmark
+                      : Icons.bookmark_outline,
+                  label: 'Toggle bookmark',
+                  onPressed: value == null
+                      ? null
+                      : () async {
+                          try {
+                            await controller.bookmark(
+                              controller.current ?? book,
+                              value.$1,
+                            );
+                          } catch (e) {
+                            if (context.mounted) showFailure(context, e);
+                          }
+                        },
+                ),
               ),
             ],
           ),
@@ -256,97 +243,27 @@ class _ReaderScreenState extends State<ReaderScreen> {
               child: ColoredBox(
                 color: paper,
                 child: controller.pdf != null
-                    ? PdfViewer.data(
-                        controller.pdf!,
-                        sourceName: 'local-encrypted-book',
-                        controller: pdfController,
-                        initialPageNumber:
+                    ? PdfReader(
+                        key: pdfReader,
+                        bytes: controller.pdf!,
+                        bookId: book.id,
+                        initialPage:
                             int.tryParse(
                               book.locator.replaceFirst('pdf-v1:', ''),
                             ) ??
                             1,
-                        params: PdfViewerParams(
-                          maxImageBytesCachedOnMemory: 32 * 1024 * 1024,
-                          linkHandlerParams: PdfLinkHandlerParams(
-                            enableAutoLinkDetection: false,
-                            onLinkTap: (_) {},
-                          ),
-                          onDocumentChanged: (document) {
-                            if (mounted) {
-                              setState(() {
-                                totalPages = document?.pages.length ?? 1;
-                                page = page.clamp(1, totalPages);
-                                pdfReady = document != null;
-                              });
-                              _stage();
-                            }
-                          },
-                          onPageChanged: (number) {
-                            if (number != null && mounted) {
-                              setState(() => page = number);
-                              _schedule();
-                            }
-                          },
-                        ),
+                        paginated: controller.paginated,
+                        onPosition: _position,
                       )
-                    : SingleChildScrollView(
-                        controller: scroll,
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'CHAPTER ${(chapter + 1).toString().padLeft(2, '0')}',
-                              style: TextStyle(
-                                fontSize: 10,
-                                letterSpacing: 1.8,
-                                color: ink.withValues(alpha: .7),
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            Text(
-                              controller.document!.chapters[chapter].title,
-                              style: TextStyle(
-                                fontFamily: 'Literata',
-                                fontSize: 26,
-                                height: 1.3,
-                                fontWeight: FontWeight.w500,
-                                color: ink,
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-                            Container(
-                              width: 88,
-                              height: 2,
-                              color: ink.withValues(alpha: .2),
-                            ),
-                            const SizedBox(height: 20),
-                            for (final paragraph
-                                in controller
-                                    .document!
-                                    .chapters[chapter]
-                                    .paragraphs)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 20),
-                                child: Text(
-                                  paragraph,
-                                  style: TextStyle(
-                                    fontFamily: 'Literata',
-                                    fontSize: controller.fontSize,
-                                    height: controller.lineHeight,
-                                    color: ink,
-                                  ),
-                                ),
-                              ),
-                            if (chapter + 1 <
-                                controller.document!.chapters.length)
-                              TextButton(
-                                onPressed: () => _changeChapter(chapter + 1),
-                                child: const Text('Next chapter →'),
-                              ),
-                            const SizedBox(height: 24),
-                          ],
-                        ),
+                    : TextReader(
+                        key: textReader,
+                        document: controller.document!,
+                        fontSize: controller.fontSize,
+                        lineHeight: controller.lineHeight,
+                        ink: ink,
+                        paginated: controller.paginated,
+                        initialLocator: book.locator,
+                        onPosition: _position,
                       ),
               ),
             ),
@@ -355,18 +272,28 @@ class _ReaderScreenState extends State<ReaderScreen> {
         Padding(
           padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               SquareAction(
                 Icons.format_list_bulleted,
                 label: 'Contents and bookmarks',
                 onPressed: _contents,
               ),
-              Text(
-                controller.pdf != null
-                    ? '$page / $totalPages'
-                    : 'Chapter ${chapter + 1} / ${controller.document!.chapters.length}',
-                style: const TextStyle(fontSize: 13, color: MutColors.accent),
+              Expanded(
+                child: ValueListenableBuilder(
+                  valueListenable: position,
+                  builder: (context, value, _) => TextButton(
+                    onPressed: value == null ? null : _goToPage,
+                    child: Text(
+                      value == null
+                          ? 'Preparing pages…'
+                          : '${value.$2} / ${value.$3} · ${(progress * 100).round()}%',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: MutColors.accent,
+                      ),
+                    ),
+                  ),
+                ),
               ),
               SizedBox(
                 width: 44,
@@ -374,16 +301,16 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 child: TextButton(
                   style: TextButton.styleFrom(
                     backgroundColor: MutColors.surface,
+                    padding: EdgeInsets.zero,
+                    side: const BorderSide(color: MutColors.edge),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
-                  onPressed: controller.pdf == null
-                      ? () => showAppearance(context, controller)
-                      : () => pdfController.zoomUp(),
-                  child: Text(
-                    controller.pdf == null ? 'Aa' : '+',
-                    style: const TextStyle(fontSize: 18, color: MutColors.text),
+                  onPressed: () => showAppearance(context, controller),
+                  child: const Text(
+                    'Aa',
+                    style: TextStyle(fontSize: 18, color: MutColors.text),
                   ),
                 ),
               ),

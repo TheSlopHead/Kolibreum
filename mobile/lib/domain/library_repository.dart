@@ -21,6 +21,7 @@ abstract interface class LibraryRepository {
   });
   Future<Uint8List> read(String id);
   Future<void> update(String id, Map<String, dynamic> changes);
+  Future<void> remove(String id);
   Future<Uint8List> backup();
   Future<void> restore(Uint8List bytes, String secret, {bool recovery = false});
   Future<void> changePassword(String password);

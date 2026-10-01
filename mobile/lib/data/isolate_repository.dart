@@ -92,6 +92,11 @@ class IsolateLibraryRepository implements LibraryRepository {
   }
 
   @override
+  Future<void> remove(String id) async {
+    await _call('remove', {'id': id});
+  }
+
+  @override
   Future<Uint8List> backup() async =>
       (await _call('backup') as TransferableTypedData)
           .materialize()
@@ -186,6 +191,8 @@ class IsolateLibraryRepository implements LibraryRepository {
               );
             case 'backup':
               value = TransferableTypedData.fromList([await store.backup()]);
+            case 'remove':
+              await store.remove(a['id'] as String);
             case 'restore':
               await store.restore(
                 (a['bytes'] as TransferableTypedData)

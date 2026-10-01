@@ -11,6 +11,7 @@ import 'package:mut_mobile/platform/documents.dart';
 
 class TestRepository implements LibraryRepository {
   bool locked = false;
+  Map<String, dynamic> settings = {};
   Completer<Uint8List>? pendingRead;
   List<Book> items = List.generate(
     12,
@@ -72,6 +73,11 @@ class TestRepository implements LibraryRepository {
   }
 
   @override
+  Future<void> remove(String id) async {
+    items.removeWhere((book) => book.id == id);
+  }
+
+  @override
   Future<String> create(String password) async => 'recovery-code';
   @override
   Future<String> importFile(
@@ -92,9 +98,11 @@ class TestRepository implements LibraryRepository {
   @override
   Future<void> dispose() async {}
   @override
-  Future<Map<String, dynamic>> preferences() async => {};
+  Future<Map<String, dynamic>> preferences() async => settings;
   @override
-  Future<void> savePreferences(Map<String, dynamic> values) async {}
+  Future<void> savePreferences(Map<String, dynamic> values) async {
+    settings = {...values};
+  }
 }
 
 class TestDocuments implements Documents {
@@ -239,6 +247,13 @@ void main() {
           find.text('At noon, light fell across the shelves in even bands.'),
           findsOneWidget,
         );
+        expect(find.text('1 / 1 · 100%'), findsOneWidget);
+        if (dimensions.width == 390) {
+          await expectLater(
+            find.byType(MaterialApp),
+            matchesGoldenFile('goldens/reader.png'),
+          );
+        }
         await tester.tap(find.text('Aa'));
         await tester.pumpAndSettle();
         expect(find.text('Reading appearance'), findsOneWidget);
@@ -283,6 +298,71 @@ void main() {
     await controller.lock();
     controller.dispose();
   });
+  testWidgets(
+    'removing a book requires confirmation and returns to the library',
+    (tester) async {
+      final repository = TestRepository();
+      final controller = LibraryController(repository)
+        ..hasArchive = true
+        ..status = LibraryStatus.unlocked;
+      await controller.refresh();
+      await tester.pumpWidget(
+        MutApp(controller: controller, documents: TestDocuments()),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Orbits of Silence').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Book actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Remove from library'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(repository.items, hasLength(12));
+      await tester.tap(find.byTooltip('Book actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Remove from library'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Remove'));
+      await tester.pumpAndSettle();
+      expect(repository.items, hasLength(11));
+      expect(find.text('All books'), findsOneWidget);
+      expect(find.text('Orbits of Silence'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
+
+  test(
+    'saving position avoids notifications and locking flushes the latest anchor',
+    () async {
+      final repository = TestRepository();
+      final controller = LibraryController(repository)
+        ..hasArchive = true
+        ..status = LibraryStatus.unlocked;
+      await controller.refresh();
+      var notifications = 0;
+      controller.addListener(() => notifications++);
+      await controller.position('book-0', 'text-v2:0:100', .25);
+      expect(notifications, 0);
+      expect(controller.books.first.locator, 'text-v2:0:100');
+      controller.stagePosition('book-0', 'text-v2:0:200', .5);
+      await controller.lock();
+      expect(repository.items.first.locator, 'text-v2:0:200');
+      expect(controller.books, isEmpty);
+      await controller.unlock('password');
+      expect(controller.books.first.locator, 'text-v2:0:200');
+      controller.appearance(pages: false, size: 23);
+      await controller.saveAppearance();
+      await controller.lock();
+      controller.appearance(pages: true, size: 18);
+      await controller.unlock('password');
+      expect(controller.paginated, false);
+      expect(controller.fontSize, 23);
+      controller.dispose();
+    },
+  );
   test('a book read finishing after lock cannot reopen the reader', () async {
     final repository = TestRepository()..pendingRead = Completer<Uint8List>();
     final controller = LibraryController(repository)

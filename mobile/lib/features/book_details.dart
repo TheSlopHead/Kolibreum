@@ -16,6 +16,65 @@ class BookDetails extends StatelessWidget {
   final Book book;
   final LibraryController controller;
   final VoidCallback onBack, onRead, onExport;
+  Future<void> _remove(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove book?'),
+        content: Text(
+          'Remove “${book.title}” from your library, including its reading progress and bookmarks? Your source file and existing backups will remain.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    try {
+      await controller.remove(book);
+      if (context.mounted) onBack();
+    } catch (e) {
+      if (context.mounted) showFailure(context, e);
+    }
+  }
+
+  Future<void> _menu(BuildContext context) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Edit book details'),
+              onTap: () => Navigator.pop(context, 'edit'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('Remove from library'),
+              onTap: () => Navigator.pop(context, 'remove'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!context.mounted) return;
+    if (action == 'edit') {
+      await _edit(context);
+    } else if (action == 'remove') {
+      await _remove(context);
+    }
+  }
+
   Future<void> _shelf(BuildContext context) async {
     final text = TextEditingController(text: book.shelves.firstOrNull ?? '');
     final shelf = await showDialog<String>(
@@ -121,8 +180,8 @@ class BookDetails extends StatelessWidget {
           ),
           SquareAction(
             Icons.more_horiz,
-            label: 'Edit book details',
-            onPressed: controller.busy ? null : () => _edit(context),
+            label: 'Book actions',
+            onPressed: controller.busy ? null : () => _menu(context),
           ),
         ],
       ),

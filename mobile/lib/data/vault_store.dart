@@ -285,6 +285,17 @@ class VaultStore {
     }
   }
 
+  Future<void> remove(String id) async {
+    _requireSession();
+    final next = _copyCatalog();
+    if ((next['books'] as Map).remove(id) == null) {
+      throw const LibraryFailure('missing', 'Book not found.');
+    }
+    // Commit the catalog first. Historical ciphertext is retained; backups
+    // include only objects reachable from the current catalog.
+    await _commit(next);
+  }
+
   Future<Uint8List> backup() async {
     _requireSession();
     final snapshot = (await File(

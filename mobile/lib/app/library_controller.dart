@@ -20,6 +20,7 @@ class LibraryController extends ChangeNotifier {
   double fontSize = 18;
   double lineHeight = 1.56;
   int pageColor = 0;
+  bool paginated = true;
   String? backupReport;
   Future<void> initialize() async {
     hasArchive = await repository.exists();
@@ -106,13 +107,31 @@ class LibraryController extends ChangeNotifier {
   }
 
   Future<void> lock() async {
+    final pending = _pendingPosition;
     _generation++;
     closeReader();
     books = [];
     backupReport = null;
     status = hasArchive ? LibraryStatus.locked : LibraryStatus.absent;
     notifyListeners();
-    await repository.lock();
+    final save = pending == null
+        ? Future<void>.value()
+        : repository.update(pending.$1, {
+            'position': {
+              'locator': pending.$2,
+              'progress': pending.$3.clamp(0, 1),
+              'updateat': DateTime.now().toUtc().toIso8601String(),
+            },
+          });
+    // Enqueue Lock immediately behind Save, before a new Unlock can arrive.
+    final locking = repository.lock();
+    try {
+      await save;
+    } catch (_) {
+      // A failed save must never prevent locking the archive.
+    } finally {
+      await locking;
+    }
   }
 
   void closeReader() {
@@ -177,15 +196,35 @@ class LibraryController extends ChangeNotifier {
   });
   Future<void> position(String id, String locator, double progress) async {
     if (status != LibraryStatus.unlocked) return;
-    await repository.update(id, {
+    final generation = _generation;
+    final changes = <String, dynamic>{
       'position': {
         'locator': locator,
         'progress': progress.clamp(0, 1),
         'updateat': DateTime.now().toUtc().toIso8601String(),
       },
-    });
-    await refresh();
+    };
+    await repository.update(id, changes);
+    if (generation != _generation || status != LibraryStatus.unlocked) return;
+    // Saving a scroll position must not rebuild the entire library/reader.
+    books = [
+      for (final book in books)
+        if (book.id == id)
+          Book.fromJson({...book.toJson(), ...changes})
+        else
+          book,
+    ];
+    if (current?.id == id) {
+      current = Book.fromJson({...current!.toJson(), ...changes});
+    }
+    if (_pendingPosition == (id, locator, progress)) _pendingPosition = null;
   }
+
+  Future<void> remove(Book book) => task(() async {
+    await repository.remove(book.id);
+    if (current?.id == book.id) closeReader();
+    await refresh();
+  });
 
   Future<void> bookmark(Book book, String locator) async {
     final marks = [...book.bookmarks];
@@ -194,10 +233,11 @@ class LibraryController extends ChangeNotifier {
     await refresh();
   }
 
-  void appearance({double? size, double? height, int? color}) {
+  void appearance({double? size, double? height, int? color, bool? pages}) {
     fontSize = (size ?? fontSize).clamp(14, 28);
     lineHeight = height ?? lineHeight;
     pageColor = color ?? pageColor;
+    paginated = pages ?? paginated;
     notifyListeners();
   }
 
@@ -209,6 +249,7 @@ class LibraryController extends ChangeNotifier {
       1.8,
     );
     pageColor = (values['pageColor'] as int? ?? 0).clamp(0, 2);
+    paginated = values['paginated'] as bool? ?? true;
   }
 
   Future<void> saveAppearance() async {
@@ -217,6 +258,7 @@ class LibraryController extends ChangeNotifier {
       'fontSize': fontSize,
       'lineHeight': lineHeight,
       'pageColor': pageColor,
+      'paginated': paginated,
     });
   }
 }

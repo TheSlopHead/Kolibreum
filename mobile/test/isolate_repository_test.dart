@@ -38,6 +38,10 @@ void main() {
         await repository.unlock('correct horse');
         expect((await repository.books()).single.title, 'Revised title');
         expect(await repository.backup(), isNotEmpty);
+        await repository.remove(id);
+        await repository.lock();
+        await repository.unlock('correct horse');
+        expect(await repository.books(), isEmpty);
       } finally {
         await repository.dispose();
         await temp.delete(recursive: true);

@@ -111,6 +111,37 @@ void main() {
     );
   });
   test(
+    'removal persists, excludes the book from backup and allows reimport',
+    () async {
+      await vault.create('correct horse');
+      final bytes = Uint8List.fromList([3, 4, 5]);
+      final removed = await vault.importFile('removed.fb2', bytes);
+      final kept = await vault.importFile(
+        'kept.bin',
+        Uint8List.fromList([8, 9]),
+      );
+      await vault.remove(removed);
+      expect(vault.books().map((book) => book.id), [kept]);
+      await expectLater(vault.read(removed), throwsA(isA<LibraryFailure>()));
+      vault.lock();
+      await vault.unlock('correct horse');
+      expect(vault.books().map((book) => book.id), [kept]);
+      final restored = VaultStore(Directory('${temp.path}/removed-backup'));
+      await restored.restore(await vault.backup(), 'correct horse');
+      expect(restored.books().map((book) => book.id), [kept]);
+      expect(await restored.read(kept), [8, 9]);
+      restored.lock();
+      await vault.importFile('reimported.fb2', bytes);
+      expect(vault.books(), hasLength(2));
+      await expectLater(
+        vault.remove('missing'),
+        throwsA(isA<LibraryFailure>()),
+      );
+      vault.lock();
+      await expectLater(vault.remove(kept), throwsA(isA<LibraryFailure>()));
+    },
+  );
+  test(
     'password change preserves recovery and does not change old backup password',
     () async {
       final code = await vault.create('old password');
