@@ -9,10 +9,13 @@ class PickedDocument {
 abstract interface class Documents {
   Future<PickedDocument?> pick({bool backup = false});
   Future<bool> save(String name, Uint8List bytes, {bool verify = false});
+  Future<void> cancel();
 }
 
 class AndroidDocuments implements Documents {
   static const channel = MethodChannel('dev.mut/documents');
+  @override
+  Future<void> cancel() => channel.invokeMethod<void>('cancel');
   @override
   Future<PickedDocument?> pick({bool backup = false}) async {
     final value = await channel.invokeMapMethod<String, dynamic>('pick', {
