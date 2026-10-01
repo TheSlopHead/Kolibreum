@@ -15,11 +15,12 @@ func (v *Vault) PutObject(data []byte) (objectID string, err error) {
 		return "", ErrVaultLocked
 	}
 	objectID = uuid.New().String()
-	objKey, err := deriveObjectKey(v.masterKey, v.header.VaultID.String(), objectID)
+	objKey, err := deriveEntityKey(v.masterKey, v.header.VaultID.String(), "object", objectID)
 	if err != nil {
 		return "", fmt.Errorf("derive obj key error: %v", err)
 	}
-	nonce, ciphertext, err := encrypt(objKey, data, []byte(objectID))
+	aad := []byte("object:" + objectID)
+	nonce, ciphertext, err := encrypt(objKey, data, aad)
 	if err != nil {
 		return "", fmt.Errorf("encryption failed: %v", err)
 	}
@@ -55,12 +56,13 @@ func (v *Vault) GetObject(objectID string) ([]byte, error) {
 	nonce := payload[:24]
 	ciphertext := payload[24:]
 
-	objectKey, err := deriveObjectKey(v.masterKey, v.header.VaultID.String(), objectID)
+	objectKey, err := deriveEntityKey(v.masterKey, v.header.VaultID.String(), "object", objectID)
 	if err != nil {
 		return nil, fmt.Errorf("derive key error: %v", err)
 	}
+	aad := []byte("object:" + objectID)
 
-	data, err := decrypt(objectKey, nonce, ciphertext, []byte(objectID))
+	data, err := decrypt(objectKey, nonce, ciphertext, aad)
 	if err != nil {
 		return nil, fmt.Errorf("decryption error: %v", err)
 	}

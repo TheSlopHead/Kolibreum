@@ -13,7 +13,7 @@ func (v *Vault) SaveSnapshot(data []byte) (snapshotID string, err error) {
 	}
 	snapshotID = uuid.New().String()
 
-	snapshotKey, err := deriveObjectKey(v.masterKey, v.header.VaultID.String(), snapshotID)
+	snapshotKey, err := deriveEntityKey(v.masterKey, v.header.VaultID.String(), "snapshot", snapshotID)
 	if err != nil {
 		return "", fmt.Errorf("derive snapshotKey error: %v", err)
 	}

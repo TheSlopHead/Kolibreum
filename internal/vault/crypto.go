@@ -75,8 +75,8 @@ func decrypt(key []byte, nonce []byte, ciphertext []byte, additionalData []byte)
 	return plainText, nil
 }
 
-func deriveObjectKey(masterkey []byte, vaultID string, objectID string) ([]byte, error) {
-	info := []byte("mut:object" + objectID)
+func deriveEntityKey(masterkey []byte, vaultID string, kind string, EntityID string) ([]byte, error) {
+	info := []byte("mut:" + kind + ":" + EntityID)
 	salt := []byte(vaultID)
 
 	kdfReader := hkdf.New(sha256.New, masterkey, salt, info)
