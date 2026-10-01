@@ -1,0 +1,13 @@
+{
+  "master": "Hx4dHBsaGRgXFhUUExIREA8ODQwLCgkIBwYFBAMCAQA=",
+  "nonce": "ERITFBUWFxgZGhscHR4fICEiIyQlJico",
+  "object_id": "ffeeddcc-bbaa-4988-8766-554433221100",
+  "object_key": "f8UoWBBivXU3P4YILSbml3u+I/8B6vDtIHETrsU+6V0=",
+  "password": "cross-platform password",
+  "password_key": "ILEbi7Ij69/CaBw25hAVHjJS0VVEt5G35F+E9sKyxhQ=",
+  "payload": "ERITFBUWFxgZGhscHR4fICEiIyQlJicoTaKbllBXDzvVxhHM8iwHrM4HxVEswQ3MBEPqXg94tygoWTEiqgjMFyNmKm0rNoO9kABwA6ed",
+  "plaintext": "UHJpdmF0ZSBib29rIOKAlCDQn9GA0LjQstC10YIsINC80LjRgC4=",
+  "salt": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "vault_id": "00112233-4455-4677-8899-aabbccddeeff",
+  "wrapped_master": "WLKxTkBqp1mxPrWtwhHqCpMjUuljZPgTt4libQz5S3rPmK+TF3MSysYxbmZNFcZB"
+}
