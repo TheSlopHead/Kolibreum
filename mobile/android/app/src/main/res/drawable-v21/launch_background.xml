@@ -1,0 +1,6 @@
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/mut_background" />
+    <item android:width="72dp" android:height="72dp" android:gravity="center">
+        <bitmap android:src="@drawable/mut_mark" android:gravity="fill" android:tint="#B8BEC1" />
+    </item>
+</layer-list>
