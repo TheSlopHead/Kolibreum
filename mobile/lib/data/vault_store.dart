@@ -301,14 +301,11 @@ class VaultStore {
     final snapshot = (await File(
       p.join(root.path, 'HEAD'),
     ).readAsString()).trim();
-    final names = <String>{
-      'vault.json',
-      'HEAD',
-      'snapshots/$snapshot',
-      ...books().map(
-        (b) => 'objects/${b.objectId.substring(0, 2)}/${b.objectId}',
-      ),
+    final originals = {
+      for (final book in books())
+        'objects/${book.objectId.substring(0, 2)}/${book.objectId}': book,
     };
+    final names = _reachableFiles(snapshot);
     final archive = Archive();
     final manifest = <String, String>{};
     int total = 0;
@@ -320,6 +317,50 @@ class VaultStore {
           'limit',
           'Backup exceeds this prototype’s 128 MB limit.',
         );
+      }
+      // Authenticate the exact ciphertext going into the ZIP, rather than
+      // rereading files after a separate dry run.
+      if (name == 'vault.json') {
+        if (jsonEncode(jsonDecode(utf8.decode(data))) != jsonEncode(_header)) {
+          throw const LibraryFailure(
+            'backup',
+            'Archive header changed. Reopen your archive before backing it up.',
+          );
+        }
+      } else if (name == 'HEAD') {
+        if (utf8.decode(data).trim() != snapshot) {
+          throw const LibraryFailure(
+            'backup',
+            'Archive root changed. Reopen your archive before backing it up.',
+          );
+        }
+      } else {
+        final book = originals[name];
+        Uint8List? plaintext;
+        try {
+          plaintext = await _openPayload(
+            book == null ? 'snapshots' : 'objects',
+            book == null ? snapshot : book.objectId,
+            data,
+          );
+          if (book != null) {
+            _verifyOriginal(book, plaintext, 'backup');
+          } else if (jsonEncode(jsonDecode(utf8.decode(plaintext))) !=
+              jsonEncode(_catalog)) {
+            throw const LibraryFailure(
+              'backup',
+              'Library catalog changed. Reopen your archive before backing it up.',
+            );
+          }
+        } on LibraryFailure catch (e) {
+          if (book == null) rethrow;
+          throw LibraryFailure(
+            e.code,
+            'Cannot back up "${book.title}": its original failed integrity verification.',
+          );
+        } finally {
+          plaintext?.fillRange(0, plaintext.length, 0);
+        }
       }
       manifest[name] = hashes.sha256.convert(data).toString();
       archive.addFile(ArchiveFile(name, data.length, data));
@@ -403,16 +444,27 @@ class VaultStore {
         await _atomic(File(p.join(stage.path, e.key)), e.value);
       }
       await verifier.unlock(secret, recovery: recovery);
+      final snapshot = utf8.decode(files['HEAD']!).trim();
+      final allowed = verifier._reachableFiles(snapshot);
+      if (files.keys.any((name) => !allowed.contains(name))) {
+        throw const LibraryFailure(
+          'restore',
+          'Backup contains extraneous unverified files.',
+        );
+      }
+      if (!allowed.every(files.containsKey)) {
+        throw const LibraryFailure(
+          'restore',
+          'Backup is missing a referenced object.',
+        );
+      }
       for (final b in verifier.books()) {
         final data = await verifier.read(b.id);
-        if (b.hash.isNotEmpty &&
-            hashes.sha256.convert(data).toString() != b.hash) {
-          throw const LibraryFailure(
-            'restore',
-            'Restored original does not match its checksum.',
-          );
+        try {
+          _verifyOriginal(b, data, 'restore');
+        } finally {
+          data.fillRange(0, data.length, 0);
         }
-        data.fillRange(0, data.length, 0);
       }
       verifier.lock();
       lock();
@@ -434,6 +486,28 @@ class VaultStore {
 
   Map<String, dynamic> _copyCatalog() =>
       Map<String, dynamic>.from(jsonDecode(jsonEncode(_catalog)) as Map);
+  Set<String> _reachableFiles(String snapshot) {
+    CryptoCodec.requireId(snapshot);
+    return {
+      'vault.json',
+      'HEAD',
+      'snapshots/$snapshot',
+      for (final book in books())
+        'objects/${book.objectId.substring(0, 2)}/${book.objectId}',
+    };
+  }
+
+  void _verifyOriginal(Book book, Uint8List data, String code) {
+    if (data.length != book.size ||
+        (book.hash.isNotEmpty &&
+            hashes.sha256.convert(data).toString() != book.hash)) {
+      throw LibraryFailure(
+        code,
+        'Original does not match its catalog size or checksum.',
+      );
+    }
+  }
+
   Future<void> _commit(Map<String, dynamic> next) async {
     final id = await _put('snapshots', utf8.encode(jsonEncode(next)));
     await _atomic(File(p.join(root.path, 'HEAD')), utf8.encode('$id\n'));
@@ -464,6 +538,22 @@ class VaultStore {
       );
     }
     final bytes = await file.readAsBytes();
+    return _openPayload(kind, id, bytes);
+  }
+
+  Future<Uint8List> _openPayload(
+    String kind,
+    String id,
+    Uint8List bytes,
+  ) async {
+    _requireSession();
+    CryptoCodec.requireId(id);
+    if (bytes.length > 40 * 1024 * 1024) {
+      throw const LibraryFailure(
+        'limit',
+        'Object is too large for this prototype.',
+      );
+    }
     final key = await codec.objectKey(
       _master!,
       _header['vault_id'] as String,
