@@ -186,7 +186,13 @@ class BookDetails extends StatelessWidget {
         ],
       ),
       const SizedBox(height: 24),
-      Center(child: SizedBox(width: 210, height: 268, child: BookCover(book))),
+      Center(
+        child: SizedBox(
+          width: 210,
+          height: 268,
+          child: BookCover(book, controller: controller),
+        ),
+      ),
       const SizedBox(height: 24),
       Text(book.title, style: Theme.of(context).textTheme.headlineMedium),
       const SizedBox(height: 8),
