@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart';
 import '../domain/library_repository.dart';
 
-/// Matches the current Go prototype: HKDF-SHA256 and nonce | ciphertext | tag.
+/// HKDF-SHA256 and nonce | ciphertext | tag. The v1 KDF is migration-only.
 class CryptoCodec {
   final cipher = Xchacha20.poly1305Aead();
   static Uint8List randomBytes(int count) {
@@ -60,6 +60,25 @@ class CryptoCodec {
         nonce: utf8.encode(vaultId),
         info: utf8.encode('mut:object$id'),
       );
+
+  static String entityContext(String kind, String id) {
+    if (kind != 'object' && kind != 'snapshot') {
+      throw const LibraryFailure('corrupt', 'Invalid encryption domain.');
+    }
+    requireId(id);
+    return '$kind:$id';
+  }
+
+  Future<SecretKey> entityKey(
+    List<int> master,
+    String vaultId,
+    String kind,
+    String id,
+  ) => Hkdf(hmac: Hmac.sha256(), outputLength: 32).deriveKey(
+    secretKey: SecretKey(master),
+    nonce: utf8.encode(vaultId),
+    info: utf8.encode('mut:${entityContext(kind, id)}'),
+  );
   Future<Uint8List> seal(List<int> data, SecretKey key, String aad) async {
     final box = await cipher.encrypt(
       data,
