@@ -16,10 +16,14 @@ MUT_RELEASE_DIR="$MUT_MOBILE_DIR/build/releases/v$MUT_RELEASE_VERSION"
 MUT_RELEASE_COMMIT="$(git rev-parse HEAD)"
 MUT_RELEASE_BRANCH="$(git branch --show-current)"
 
-"$MUT_FLUTTER" pub get --enforce-lockfile
-"$MUT_FLUTTER" analyze
-"$MUT_FLUTTER" test
-"$MUT_FLUTTER" build apk --release --target-platform android-arm64 --split-per-abi
+MUT_RELEASE_PUB_ARGS=(--enforce-lockfile)
+if [[ "${MUT_RELEASE_OFFLINE:-0}" == "1" ]]; then
+  MUT_RELEASE_PUB_ARGS+=(--offline)
+fi
+"$MUT_FLUTTER" pub get "${MUT_RELEASE_PUB_ARGS[@]}"
+"$MUT_FLUTTER" analyze --no-pub
+"$MUT_FLUTTER" test --no-pub
+"$MUT_FLUTTER" build apk --release --no-pub --target-platform android-arm64 --split-per-abi
 
 mkdir -p "$MUT_RELEASE_DIR"
 MUT_RELEASE_APK="$MUT_RELEASE_DIR/mut-$MUT_RELEASE_VERSION-android-arm64.apk"
