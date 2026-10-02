@@ -8,11 +8,16 @@ import 'package:mut_mobile/app/mut_app.dart';
 import 'package:mut_mobile/domain/book.dart';
 import 'package:mut_mobile/domain/library_repository.dart';
 import 'package:mut_mobile/platform/documents.dart';
+import 'package:mut_mobile/ui/components.dart';
+import 'support/cover_fixtures.dart';
 
 class TestRepository implements LibraryRepository {
   bool locked = false;
   Map<String, dynamic> settings = {};
   Completer<Uint8List>? pendingRead;
+  Completer<Uint8List?>? pendingCover;
+  Uint8List? coverBytes;
+  int coverReads = 0;
   List<Book> items = List.generate(
     12,
     (i) => Book(
@@ -66,6 +71,14 @@ class TestRepository implements LibraryRepository {
   @override
   Future<Uint8List> read(String id) =>
       pendingRead?.future ?? Future.value(readingBytes());
+  @override
+  Future<Uint8List?> readCover(String id) async {
+    coverReads++;
+    if (locked) throw const LibraryFailure('locked', 'Locked');
+    return pendingCover?.future ??
+        (coverBytes == null ? null : Uint8List.fromList(coverBytes!));
+  }
+
   @override
   Future<void> update(String id, Map<String, dynamic> changes) async {
     final i = items.indexWhere((b) => b.id == id);
@@ -362,6 +375,112 @@ void main() {
       await controller.unlock('password');
       expect(controller.paginated, false);
       expect(controller.fontSize, 23);
+      controller.dispose();
+    },
+  );
+  testWidgets(
+    'private cover images render without ImageCache and disappear on lock',
+    (tester) async {
+      final repository = TestRepository()..coverBytes = coverPng();
+      final controller = LibraryController(repository)
+        ..hasArchive = true
+        ..status = LibraryStatus.unlocked;
+      final cacheSize = PaintingBinding.instance.imageCache.currentSize;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Center(
+            child: SizedBox(
+              width: 160,
+              height: 220,
+              child: BookCover(repository.items.first, controller: controller),
+            ),
+          ),
+        ),
+      );
+      for (int i = 0; i < 50 && find.byType(RawImage).evaluate().isEmpty; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump();
+      }
+      expect(find.byType(RawImage), findsOneWidget);
+      expect(tester.widget<RawImage>(find.byType(RawImage)).image!.width, 32);
+      expect(PaintingBinding.instance.imageCache.currentSize, cacheSize);
+      await controller.lock();
+      await tester.pump();
+      expect(find.byType(RawImage), findsNothing);
+      expect(find.text('Orbits of Silence'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
+  testWidgets('corrupt thumbnail bytes retain the text cover', (tester) async {
+    final repository = TestRepository()
+      ..coverBytes = Uint8List.fromList([1, 2, 3]);
+    final controller = LibraryController(repository)
+      ..status = LibraryStatus.unlocked;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SizedBox(
+          width: 160,
+          height: 220,
+          child: BookCover(repository.items.first, controller: controller),
+        ),
+      ),
+    );
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(RawImage), findsNothing);
+    expect(find.text('Orbits of Silence'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+  test(
+    'concurrent cover reads share work and a late result is erased after lock',
+    () async {
+      final repository = TestRepository()
+        ..pendingCover = Completer<Uint8List?>();
+      final controller = LibraryController(repository)
+        ..hasArchive = true
+        ..status = LibraryStatus.unlocked;
+      final first = controller.cover('book-0');
+      final second = controller.cover('book-0');
+      expect(repository.coverReads, 1);
+      await controller.lock();
+      final lateBytes = coverPng();
+      repository.pendingCover!.complete(lateBytes);
+      expect(await first, isNull);
+      expect(await second, isNull);
+      expect(lateBytes.every((b) => b == 0), true);
+      repository.pendingCover = null;
+      repository.coverBytes = coverPng();
+      await controller.unlock('password');
+      expect(await controller.cover('book-0'), isNotNull);
+      expect(repository.coverReads, 2);
+      controller.dispose();
+    },
+  );
+  test(
+    'cover cache is bounded, remembers misses and clears after restore',
+    () async {
+      final repository = TestRepository();
+      final controller = LibraryController(repository)
+        ..status = LibraryStatus.unlocked;
+      expect(await controller.cover('missing-0'), isNull);
+      expect(await controller.cover('missing-0'), isNull);
+      expect(repository.coverReads, 1);
+      for (int i = 1; i <= 32; i++) {
+        await controller.cover('missing-$i');
+      }
+      await controller.cover('missing-0');
+      expect(repository.coverReads, 34);
+      repository.coverBytes = coverPng();
+      await controller.restore(Uint8List(0), 'password');
+      expect(await controller.cover('missing-0'), isNotNull);
       controller.dispose();
     },
   );
