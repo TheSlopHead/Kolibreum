@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import '../domain/book.dart';
 import '../domain/library_repository.dart';
 import 'crypto_codec.dart';
+import 'cover_decoder.dart';
 import 'safe_zip.dart';
 
 /// Owned by the worker isolate. No widgets, platform APIs, logs or global keys.
@@ -25,7 +26,30 @@ class VaultStore {
   Map<String, dynamic> _header = {};
   Map<String, dynamic> _catalog = {};
   bool get unlocked => _master != null;
-  Future<bool> exists() => File(p.join(root.path, 'vault.json')).exists();
+  static Future<void> recoverInterruptedSwap(Directory root) async {
+    final journal = File('${root.path}.migration');
+    if (await root.exists()) {
+      if (await journal.exists()) await journal.delete();
+      return;
+    }
+    // The marker distinguishes an interrupted migration from a restore when
+    // both old copies exist. Never promote a partially written staging vault.
+    final migrating = await journal.exists();
+    for (final suffix in migrating ? ['.v1', '.previous'] : ['.previous']) {
+      final source = Directory('${root.path}$suffix');
+      if (await source.exists()) {
+        await source.rename(root.path);
+        if (migrating) await journal.delete();
+        return;
+      }
+    }
+  }
+
+  Future<bool> exists() async {
+    await recoverInterruptedSwap(root);
+    return File(p.join(root.path, 'vault.json')).exists();
+  }
+
   void _requireSession() {
     if (!unlocked) {
       throw const LibraryFailure('locked', 'Unlock your archive first.');
@@ -61,7 +85,7 @@ class VaultStore {
       '$vaultId:recovery',
     );
     _header = {
-      'version': 1,
+      'version': 2,
       'vault_id': vaultId,
       'kdf': kdf,
       'key_nonce': base64Encode(wrapped.sublist(0, 24)),
@@ -91,9 +115,14 @@ class VaultStore {
     return code;
   }
 
-  Future<void> unlock(String secret, {bool recovery = false}) async {
+  Future<void> unlock(
+    String secret, {
+    bool recovery = false,
+    bool migrate = true,
+  }) async {
     lock();
     try {
+      await recoverInterruptedSwap(root);
       final file = File(p.join(root.path, 'vault.json'));
       if (await file.length() > 16384) {
         throw const LibraryFailure('corrupt', 'Invalid archive header.');
@@ -101,7 +130,7 @@ class VaultStore {
       _header = Map<String, dynamic>.from(
         jsonDecode(await file.readAsString()) as Map,
       );
-      if (_header['version'] != 1) {
+      if (_header['version'] != 1 && _header['version'] != 2) {
         throw const LibraryFailure('version', 'Unsupported archive version.');
       }
       final id = _header['vault_id'] as String;
@@ -162,6 +191,12 @@ class VaultStore {
       for (final b in books()) {
         CryptoCodec.requireId(b.id);
         CryptoCodec.requireId(b.objectId);
+        if (b.coverObjectId.isNotEmpty) {
+          CryptoCodec.requireId(b.coverObjectId);
+        }
+      }
+      if (migrate && _header['version'] == 1) {
+        await _migrateV2(secret, recovery: recovery);
       }
     } catch (_) {
       lock();
@@ -188,6 +223,7 @@ class VaultStore {
     String name,
     Uint8List data, {
     bool keepDuplicate = false,
+    Uint8List? pdfCover,
   }) async {
     _requireSession();
     if (data.length > 32 * 1024 * 1024) {
@@ -206,6 +242,17 @@ class VaultStore {
     final format = p.extension(name).replaceFirst('.', '').toUpperCase();
     final id = CryptoCodec.newId();
     final object = await _put('objects', data);
+    final cover = format == 'PDF' && pdfCover != null
+        ? makeCoverThumbnail(pdfCover)
+        : extractBookCover(data, format);
+    String coverObject = '';
+    if (cover != null) {
+      try {
+        coverObject = await _put('objects', cover);
+      } finally {
+        cover.fillRange(0, cover.length, 0);
+      }
+    }
     final book = Book(
       id: id,
       title: p.basenameWithoutExtension(name),
@@ -214,6 +261,8 @@ class VaultStore {
       objectId: object,
       size: data.length,
       hash: hash,
+      coverObjectId: coverObject,
+      coverChecked: true,
     );
     final next = _copyCatalog();
     (next['books'] as Map)[id] = book.toJson();
@@ -231,6 +280,73 @@ class VaultStore {
       );
     }
     return _get('objects', b['fileobjectid'] as String);
+  }
+
+  /// Old catalogs are upgraded lazily, once per book, without changing metadata.
+  Future<Uint8List?> readCover(String id) async {
+    _requireSession();
+    final raw = (_catalog['books'] as Map)[id];
+    if (raw == null) throw const LibraryFailure('missing', 'Book not found.');
+    final book = Book.fromJson(Map<String, dynamic>.from(raw as Map));
+    String coverId = book.coverObjectId;
+    if (!book.coverChecked && coverId.isEmpty && book.format != 'PDF') {
+      Uint8List? cover;
+      if (const ['EPUB', 'FB2'].contains(book.format)) {
+        final original = await read(id);
+        try {
+          cover = extractBookCover(original, book.format);
+        } finally {
+          original.fillRange(0, original.length, 0);
+        }
+      }
+      if (cover != null) {
+        try {
+          coverId = await _put('objects', cover);
+        } finally {
+          cover.fillRange(0, cover.length, 0);
+        }
+      }
+      final next = _copyCatalog();
+      final updated = (next['books'] as Map)[id] as Map;
+      updated['coverobjectid'] = coverId;
+      updated['cover_checked'] = true;
+      await _commit(next);
+    }
+    if (coverId.isEmpty) return null;
+    final bytes = await _get('objects', coverId);
+    if (bytes.length > maxCoverThumbnailBytes) {
+      bytes.fillRange(0, bytes.length, 0);
+      throw const LibraryFailure('cover', 'Cover exceeds the supported limit.');
+    }
+    return bytes;
+  }
+
+  bool needsPdfCover(String id) {
+    _requireSession();
+    final raw = (_catalog['books'] as Map)[id];
+    if (raw == null) throw const LibraryFailure('missing', 'Book not found.');
+    final book = Book.fromJson(Map<String, dynamic>.from(raw as Map));
+    return book.format == 'PDF' &&
+        !book.coverChecked &&
+        book.coverObjectId.isEmpty;
+  }
+
+  Future<void> savePdfCover(String id, Uint8List? bytes) async {
+    if (!needsPdfCover(id)) return;
+    final cover = bytes == null ? null : makeCoverThumbnail(bytes);
+    String objectId = '';
+    if (cover != null) {
+      try {
+        objectId = await _put('objects', cover);
+      } finally {
+        cover.fillRange(0, cover.length, 0);
+      }
+    }
+    final next = _copyCatalog();
+    final book = (next['books'] as Map)[id] as Map;
+    book['coverobjectid'] = objectId;
+    book['cover_checked'] = true;
+    await _commit(next);
   }
 
   Future<void> update(String id, Map<String, dynamic> changes) async {
@@ -305,6 +421,11 @@ class VaultStore {
       for (final book in books())
         'objects/${book.objectId.substring(0, 2)}/${book.objectId}': book,
     };
+    final covers = {
+      for (final book in books().where((b) => b.coverObjectId.isNotEmpty))
+        'objects/${book.coverObjectId.substring(0, 2)}/${book.coverObjectId}':
+            book,
+    };
     final names = _reachableFiles(snapshot);
     final archive = Archive();
     final manifest = <String, String>{};
@@ -336,15 +457,23 @@ class VaultStore {
         }
       } else {
         final book = originals[name];
+        final coverBook = covers[name];
         Uint8List? plaintext;
         try {
           plaintext = await _openPayload(
-            book == null ? 'snapshots' : 'objects',
-            book == null ? snapshot : book.objectId,
+            book == null && coverBook == null ? 'snapshots' : 'objects',
+            book?.objectId ?? coverBook?.coverObjectId ?? snapshot,
             data,
           );
           if (book != null) {
             _verifyOriginal(book, plaintext, 'backup');
+          } else if (coverBook != null) {
+            if (plaintext.length > maxCoverThumbnailBytes) {
+              throw const LibraryFailure(
+                'backup',
+                'Cover exceeds its size limit.',
+              );
+            }
           } else if (jsonEncode(jsonDecode(utf8.decode(plaintext))) !=
               jsonEncode(_catalog)) {
             throw const LibraryFailure(
@@ -353,10 +482,10 @@ class VaultStore {
             );
           }
         } on LibraryFailure catch (e) {
-          if (book == null) rethrow;
+          if (book == null && coverBook == null) rethrow;
           throw LibraryFailure(
             e.code,
-            'Cannot back up "${book.title}": its original failed integrity verification.',
+            'Cannot back up "${(book ?? coverBook!).title}": its ${coverBook == null ? "original" : "cover"} failed integrity verification.',
           );
         } finally {
           plaintext?.fillRange(0, plaintext.length, 0);
@@ -443,7 +572,8 @@ class VaultStore {
       for (final e in files.entries) {
         await _atomic(File(p.join(stage.path, e.key)), e.value);
       }
-      await verifier.unlock(secret, recovery: recovery);
+      // Validate the original backup's graph before migration changes files.
+      await verifier.unlock(secret, recovery: recovery, migrate: false);
       final snapshot = utf8.decode(files['HEAD']!).trim();
       final allowed = verifier._reachableFiles(snapshot);
       if (files.keys.any((name) => !allowed.contains(name))) {
@@ -458,13 +588,13 @@ class VaultStore {
           'Backup is missing a referenced object.',
         );
       }
-      for (final b in verifier.books()) {
-        final data = await verifier.read(b.id);
-        try {
-          _verifyOriginal(b, data, 'restore');
-        } finally {
-          data.fillRange(0, data.length, 0);
-        }
+      await verifier._verifyContents('restore');
+      if (verifier._header['version'] == 1) {
+        await verifier._migrateV2(
+          secret,
+          recovery: recovery,
+          preserveLegacy: false,
+        );
       }
       verifier.lock();
       lock();
@@ -486,6 +616,107 @@ class VaultStore {
 
   Map<String, dynamic> _copyCatalog() =>
       Map<String, dynamic>.from(jsonDecode(jsonEncode(_catalog)) as Map);
+
+  Future<void> _verifyContents(String code) async {
+    for (final book in books()) {
+      final data = await read(book.id);
+      try {
+        _verifyOriginal(book, data, code);
+      } finally {
+        data.fillRange(0, data.length, 0);
+      }
+      if (book.coverObjectId.isNotEmpty) {
+        final cover = await readCover(book.id);
+        cover?.fillRange(0, cover.length, 0);
+      }
+    }
+  }
+
+  /// Reencrypt the current graph, including originals and covers, into a fresh
+  /// sibling directory. Source files and header stay unchanged until verified.
+  Future<void> _migrateV2(
+    String secret, {
+    required bool recovery,
+    bool preserveLegacy = true,
+  }) async {
+    _requireSession();
+    if (_header['version'] != 1) return;
+    final legacy = Directory(
+      preserveLegacy
+          ? '${root.path}.v1'
+          : '${root.path}.migration-old-${CryptoCodec.newId()}',
+    );
+    if (await legacy.exists()) {
+      throw const LibraryFailure(
+        'migration',
+        'A saved v1 archive needs attention before another migration.',
+      );
+    }
+    final stage = Directory('${root.path}.migrate-${CryptoCodec.newId()}');
+    final journal = File('${root.path}.migration');
+    final writer = VaultStore(stage);
+    bool swapped = false;
+    try {
+      await _verifyContents('migration');
+      final snapshot = (await File(
+        p.join(root.path, 'HEAD'),
+      ).readAsString()).trim();
+      CryptoCodec.requireId(snapshot);
+      writer._header = {..._header, 'version': 2};
+      writer._master = Uint8List.fromList(_master!);
+      writer._catalog = _copyCatalog();
+      final ids = <String>{
+        for (final book in books()) book.objectId,
+        for (final book in books().where((b) => b.coverObjectId.isNotEmpty))
+          book.coverObjectId,
+      };
+      for (final id in ids) {
+        final plaintext = await _get('objects', id);
+        try {
+          await writer._writeEntity('objects', id, plaintext);
+        } finally {
+          plaintext.fillRange(0, plaintext.length, 0);
+        }
+      }
+      final catalog = Uint8List.fromList(
+        utf8.encode(jsonEncode(writer._catalog)),
+      );
+      try {
+        await writer._writeEntity('snapshots', snapshot, catalog);
+      } finally {
+        catalog.fillRange(0, catalog.length, 0);
+      }
+      await writer._atomic(
+        File(p.join(stage.path, 'HEAD')),
+        utf8.encode('$snapshot\n'),
+      );
+      await writer._atomic(
+        File(p.join(stage.path, 'vault.json')),
+        utf8.encode(jsonEncode(writer._header)),
+      );
+      await writer.unlock(secret, recovery: recovery, migrate: false);
+      await writer._verifyContents('migration');
+      if (preserveLegacy) await _atomic(journal, utf8.encode('v1\n'));
+      await root.rename(legacy.path);
+      try {
+        await stage.rename(root.path);
+        swapped = true;
+      } catch (_) {
+        await legacy.rename(root.path);
+        rethrow;
+      }
+      _header = {...writer._header};
+      // Only the disposable restore staging source can be cleaned up.
+      if (!preserveLegacy) await legacy.delete(recursive: true);
+    } finally {
+      writer.lock();
+      if (preserveLegacy && await root.exists() && await journal.exists()) {
+        await journal.delete();
+      }
+      if (!swapped && await stage.exists()) await stage.delete(recursive: true);
+    }
+  }
+
   Set<String> _reachableFiles(String snapshot) {
     CryptoCodec.requireId(snapshot);
     return {
@@ -494,6 +725,8 @@ class VaultStore {
       'snapshots/$snapshot',
       for (final book in books())
         'objects/${book.objectId.substring(0, 2)}/${book.objectId}',
+      for (final book in books().where((b) => b.coverObjectId.isNotEmpty))
+        'objects/${book.coverObjectId.substring(0, 2)}/${book.coverObjectId}',
     };
   }
 
@@ -509,22 +742,50 @@ class VaultStore {
   }
 
   Future<void> _commit(Map<String, dynamic> next) async {
-    final id = await _put('snapshots', utf8.encode(jsonEncode(next)));
-    await _atomic(File(p.join(root.path, 'HEAD')), utf8.encode('$id\n'));
-    _catalog = next;
+    final plaintext = Uint8List.fromList(utf8.encode(jsonEncode(next)));
+    try {
+      final id = await _put('snapshots', plaintext);
+      await _atomic(File(p.join(root.path, 'HEAD')), utf8.encode('$id\n'));
+      _catalog = next;
+    } finally {
+      plaintext.fillRange(0, plaintext.length, 0);
+    }
   }
 
   Future<String> _put(String kind, List<int> data) async {
     _requireSession();
     final id = CryptoCodec.newId();
-    final key = await codec.objectKey(
+    await _writeEntity(kind, id, data);
+    return id;
+  }
+
+  String _domain(String kind) => switch (kind) {
+    'objects' => 'object',
+    'snapshots' => 'snapshot',
+    _ => throw const LibraryFailure('corrupt', 'Invalid encryption domain.'),
+  };
+
+  Future<void> _writeEntity(String kind, String id, List<int> data) async {
+    _requireSession();
+    if (_header['version'] != 2) {
+      throw const LibraryFailure(
+        'migration',
+        'Archive must be upgraded before writing.',
+      );
+    }
+    final domain = _domain(kind);
+    final key = await codec.entityKey(
       _master!,
       _header['vault_id'] as String,
+      domain,
       id,
     );
-    final bytes = await codec.seal(data, key, id);
+    final bytes = await codec.seal(
+      data,
+      key,
+      CryptoCodec.entityContext(domain, id),
+    );
     await _atomic(_objectFile(kind, id), bytes);
-    return id;
   }
 
   Future<Uint8List> _get(String kind, String id) async {
@@ -554,12 +815,22 @@ class VaultStore {
         'Object is too large for this prototype.',
       );
     }
-    final key = await codec.objectKey(
-      _master!,
-      _header['vault_id'] as String,
-      id,
+    final domain = _domain(kind);
+    final legacy = _header['version'] == 1;
+    final key = legacy
+        ? await codec.objectKey(_master!, _header['vault_id'] as String, id)
+        : await codec.entityKey(
+            _master!,
+            _header['vault_id'] as String,
+            domain,
+            id,
+          );
+    // Version is dispatched once; authentication failures never try v1 keys.
+    return codec.open(
+      bytes,
+      key,
+      legacy ? id : CryptoCodec.entityContext(domain, id),
     );
-    return codec.open(bytes, key, id);
   }
 
   File _objectFile(String kind, String id) => File(
