@@ -20,6 +20,7 @@ abstract interface class LibraryRepository {
     bool keepDuplicate = false,
   });
   Future<Uint8List> read(String id);
+  Future<Uint8List?> readCover(String id);
   Future<void> update(String id, Map<String, dynamic> changes);
   Future<void> remove(String id);
   Future<Uint8List> backup();
