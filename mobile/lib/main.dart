@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'app/library_controller.dart';
 import 'app/mut_app.dart';
 import 'data/isolate_repository.dart';
+import 'data/vault_store.dart';
 import 'platform/documents.dart';
 
 Future<void> main() async {
@@ -21,10 +22,7 @@ Future<void> main() async {
   final application = await getApplicationSupportDirectory();
   final root = Directory(p.join(application.path, 'vault'));
   // Recover an interrupted directory swap; never choose an unverified staging directory.
-  final previous = Directory('${root.path}.previous');
-  if (!await root.exists() && await previous.exists()) {
-    await previous.rename(root.path);
-  }
+  await VaultStore.recoverInterruptedSwap(root);
   final repository = await IsolateLibraryRepository.start(root.path);
   final controller = LibraryController(repository);
   await controller.initialize();
