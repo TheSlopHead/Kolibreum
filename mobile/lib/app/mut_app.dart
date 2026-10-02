@@ -374,7 +374,11 @@ class _LibraryShellState extends State<LibraryShell>
                       SizedBox(
                         width: 36,
                         height: 44,
-                        child: BookCover(recent, thumbnail: true),
+                        child: BookCover(
+                          recent,
+                          thumbnail: true,
+                          controller: controller,
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
