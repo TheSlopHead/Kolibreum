@@ -1,7 +1,7 @@
 name: mut_mobile
 description: Local encrypted library and reader for Android.
 publish_to: none
-version: 0.1.0+2
+version: 0.1.1+3
 environment:
   sdk: '>=3.10.0 <4.0.0'
 dependencies:
@@ -11,6 +11,7 @@ dependencies:
   cryptography: ^2.9.0
   crypto: ^3.0.6
   xml: ^6.6.1
+  image: ^4.10.1
   path: ^1.9.1
   path_provider: ^2.1.5
   pdfrx: ^2.6.5
