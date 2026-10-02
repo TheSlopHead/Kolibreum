@@ -160,7 +160,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           Expanded(
                             child: SizedBox(
                               width: double.infinity,
-                              child: BookCover(b, index: books.indexOf(b)),
+                              child: BookCover(
+                                b,
+                                index: books.indexOf(b),
+                                controller: widget.controller,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -286,7 +290,12 @@ class _ShelvesScreenState extends State<ShelvesScreen> {
           ),
         for (final (i, b) in books.indexed) ...[
           const Divider(height: 1),
-          BookRow(b, index: i, onTap: () => widget.onBook(b)),
+          BookRow(
+            b,
+            index: i,
+            onTap: () => widget.onBook(b),
+            controller: widget.controller,
+          ),
         ],
         const SizedBox(height: 170),
       ],
@@ -380,7 +389,11 @@ class _SearchScreenState extends State<SearchScreen> {
         ),
         for (final b in books) ...[
           const Divider(height: 1),
-          BookRow(b, onTap: () => widget.onBook(b)),
+          BookRow(
+            b,
+            onTap: () => widget.onBook(b),
+            controller: widget.controller,
+          ),
         ],
         const Divider(height: 1),
         const Padding(
