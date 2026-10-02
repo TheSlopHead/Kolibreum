@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mut_mobile/data/isolate_repository.dart';
 import 'package:mut_mobile/data/vault_store.dart';
 import 'package:mut_mobile/domain/library_repository.dart';
+import 'support/cover_fixtures.dart';
 
 void main() {
   test(
@@ -33,12 +34,26 @@ void main() {
         expect((await repository.books()).single.shelves, ['Custom shelf']);
         expect((await repository.preferences())['fontSize'], 24);
         expect(await repository.read(id), [0, 1, 255]);
+        expect(await repository.readCover(id), isNull);
+        final coveredId = await repository.importFile('cover.fb2', coverFb2());
+        final thumbnail = await repository.readCover(coveredId);
+        expect(thumbnail, isNotNull);
         await repository.lock();
         await expectLater(repository.read(id), throwsA(isA<LibraryFailure>()));
+        await expectLater(
+          repository.readCover(coveredId),
+          throwsA(isA<LibraryFailure>()),
+        );
         await repository.unlock('correct horse');
-        expect((await repository.books()).single.title, 'Revised title');
+        expect(
+          (await repository.books()).firstWhere((b) => b.id == id).title,
+          'Revised title',
+        );
+        expect(await repository.readCover(coveredId), thumbnail);
         expect(await repository.backup(), isNotEmpty);
         await repository.remove(id);
+        expect((await repository.books()).single.id, coveredId);
+        await repository.remove(coveredId);
         await repository.lock();
         await repository.unlock('correct horse');
         expect(await repository.books(), isEmpty);
