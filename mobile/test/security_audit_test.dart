@@ -1,5 +1,4 @@
-// Security regressions for mobile fixes. REPRO SEC-02 remains evidence of
-// the v1 format limitation pending the separately coordinated v2 migration.
+// Security regressions for the mobile fixes and format v2.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -93,7 +92,7 @@ void main() {
     await temp.delete(recursive: true);
   });
 
-  test('REPRO SEC-02: imported JSON ciphertext accepted as a catalog', () async {
+  test('SEC-02: imported JSON ciphertext cannot replace a v2 catalog', () async {
     await vault.create('audit password');
     final privateId = await vault.importFile(
       'private.txt',
@@ -125,9 +124,13 @@ void main() {
       '${vault.root.path}/HEAD',
     ).writeAsString('${carrier.objectId}\n');
     vault.lock();
-    await vault.unlock('audit password'); // Victim enters their own secret.
-    expect(vault.books().single.title, 'ATTACKER_CONTROLLED');
-    expect(utf8.decode(await vault.read(privateId)), 'PRIVATE_ORIGINAL');
+    await expectLater(
+      vault.unlock('audit password'),
+      throwsA(
+        isA<LibraryFailure>().having((e) => e.code, 'code', 'authentication'),
+      ),
+    );
+    expect(vault.unlocked, false);
   });
 
   test('SEC-03: nested FB2 paragraphs do not amplify text', () {
