@@ -27,6 +27,67 @@ class LibraryController extends ChangeNotifier {
   int pageColor = 0;
   bool paginated = true;
   String? backupReport;
+  final _covers = <String, Uint8List?>{};
+  final _pendingCovers = <String, Future<Uint8List?>>{};
+
+  /// Session-only LRU of compressed thumbnails; widgets decode without using
+  /// Flutter's global ImageCache. Concurrent requests for one book share work.
+  Future<Uint8List?> cover(String id) {
+    if (status != LibraryStatus.unlocked) return Future.value();
+    if (_covers.containsKey(id)) {
+      final bytes = _covers.remove(id);
+      _covers[id] = bytes;
+      return Future.value(bytes == null ? null : Uint8List.fromList(bytes));
+    }
+    return _coverBytes(
+      id,
+    ).then((bytes) => bytes == null ? null : Uint8List.fromList(bytes));
+  }
+
+  Future<Uint8List?> _coverBytes(String id) {
+    final pending = _pendingCovers[id];
+    if (pending != null) return pending;
+    final generation = _generation;
+    late final Future<Uint8List?> loading;
+    loading = (() async {
+      Uint8List? bytes;
+      try {
+        bytes = await repository.readCover(id);
+        if (generation != _generation || status != LibraryStatus.unlocked) {
+          bytes?.fillRange(0, bytes.length, 0);
+          return null;
+        }
+        _rememberCover(id, bytes);
+        return bytes;
+      } catch (_) {
+        if (generation == _generation && status == LibraryStatus.unlocked) {
+          _rememberCover(id, null);
+        }
+        return null;
+      } finally {
+        if (identical(_pendingCovers[id], loading)) _pendingCovers.remove(id);
+      }
+    })();
+    _pendingCovers[id] = loading;
+    return loading;
+  }
+
+  void _rememberCover(String id, Uint8List? bytes) {
+    _covers[id] = bytes;
+    while (_covers.length > 32) {
+      final evicted = _covers.remove(_covers.keys.first);
+      evicted?.fillRange(0, evicted.length, 0);
+    }
+  }
+
+  void _clearCovers() {
+    for (final bytes in _covers.values) {
+      bytes?.fillRange(0, bytes.length, 0);
+    }
+    _covers.clear();
+    _pendingCovers.clear();
+  }
+
   Future<void> initialize() async {
     hasArchive = await repository.exists();
     status = hasArchive ? LibraryStatus.locked : LibraryStatus.absent;
@@ -84,6 +145,8 @@ class LibraryController extends ChangeNotifier {
       await repository.lock();
       return;
     }
+    _generation++;
+    _clearCovers();
     closeReader();
     status = LibraryStatus.unlocked;
     await _loadPreferences();
@@ -117,6 +180,7 @@ class LibraryController extends ChangeNotifier {
     final cancelling = _cancelDocuments();
     final pending = _pendingPosition;
     _generation++;
+    _clearCovers();
     closeReader();
     books = [];
     backupReport = null;
@@ -149,6 +213,13 @@ class LibraryController extends ChangeNotifier {
     } catch (_) {
       // A disconnected/destroyed platform must not prevent the vault locking.
     }
+  }
+
+  @override
+  void dispose() {
+    _generation++;
+    _clearCovers();
+    super.dispose();
   }
 
   void closeReader() {
