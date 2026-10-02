@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import '../app/library_controller.dart';
 import '../domain/book.dart';
 import 'theme.dart';
 
@@ -92,16 +95,113 @@ class ScreenHeading extends StatelessWidget {
   );
 }
 
-class BookCover extends StatelessWidget {
+class BookCover extends StatefulWidget {
   const BookCover(
     this.book, {
     super.key,
     this.index = 0,
     this.thumbnail = false,
+    this.controller,
   });
   final Book book;
   final int index;
   final bool thumbnail;
+  final LibraryController? controller;
+  @override
+  State<BookCover> createState() => _BookCoverState();
+}
+
+class _BookCoverState extends State<BookCover> {
+  ui.Image? _image;
+  int _request = 0, _session = -1;
+  Book get book => widget.book;
+  int get index => widget.index;
+  bool get thumbnail => widget.thumbnail;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller?.addListener(_sessionChanged);
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(BookCover oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller ||
+        oldWidget.book.id != book.id ||
+        oldWidget.book.coverObjectId != book.coverObjectId) {
+      oldWidget.controller?.removeListener(_sessionChanged);
+      widget.controller?.addListener(_sessionChanged);
+      _discardImage();
+      _load();
+    }
+  }
+
+  void _discardImage() {
+    _request++;
+    _image?.dispose();
+    _image = null;
+  }
+
+  void _sessionChanged() {
+    final controller = widget.controller!;
+    if (controller.status != LibraryStatus.unlocked) {
+      if (_session != -1) {
+        setState(() {
+          _discardImage();
+          _session = -1;
+        });
+      }
+    } else if (_session != controller.sessionGeneration) {
+      setState(_discardImage);
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    final controller = widget.controller;
+    if (controller == null || controller.status != LibraryStatus.unlocked) {
+      return;
+    }
+    final request = ++_request;
+    _session = controller.sessionGeneration;
+    bool valid() =>
+        mounted &&
+        request == _request &&
+        controller.status == LibraryStatus.unlocked &&
+        _session == controller.sessionGeneration;
+    Uint8List? bytes;
+    ui.Codec? codec;
+    try {
+      bytes = await controller.cover(book.id);
+      if (bytes == null || !valid()) return;
+      // Use a widget-owned image: private thumbnails never enter ImageCache.
+      codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      if (!valid()) {
+        frame.image.dispose();
+        return;
+      }
+      setState(() {
+        _image?.dispose();
+        _image = frame.image;
+      });
+    } catch (_) {
+      // Preserve the existing text card on a read/decode failure.
+    } finally {
+      codec?.dispose();
+      bytes?.fillRange(0, bytes.length, 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller?.removeListener(_sessionChanged);
+    _discardImage();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => Semantics(
     label: '${book.title}, ${book.author}',
@@ -109,8 +209,17 @@ class BookCover extends StatelessWidget {
     child: Glass(
       color: MutColors.covers[index % MutColors.covers.length],
       radius: thumbnail ? 12 : 16,
-      padding: EdgeInsets.all(thumbnail ? 8 : 12),
-      child: thumbnail
+      padding: _image == null
+          ? EdgeInsets.all(thumbnail ? 8 : 12)
+          : EdgeInsets.zero,
+      child: _image != null
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(thumbnail ? 12 : 16),
+              child: SizedBox.expand(
+                child: RawImage(image: _image, fit: BoxFit.contain),
+              ),
+            )
+          : thumbnail
           ? Center(
               child: Text(
                 book.initials,
@@ -158,10 +267,17 @@ class BookCover extends StatelessWidget {
 }
 
 class BookRow extends StatelessWidget {
-  const BookRow(this.book, {super.key, required this.onTap, this.index = 0});
+  const BookRow(
+    this.book, {
+    super.key,
+    required this.onTap,
+    this.index = 0,
+    this.controller,
+  });
   final Book book;
   final VoidCallback onTap;
   final int index;
+  final LibraryController? controller;
   @override
   Widget build(BuildContext context) => InkWell(
     onTap: onTap,
@@ -172,7 +288,12 @@ class BookRow extends StatelessWidget {
           SizedBox(
             width: 72,
             height: 96,
-            child: BookCover(book, index: index, thumbnail: true),
+            child: BookCover(
+              book,
+              index: index,
+              thumbnail: true,
+              controller: controller,
+            ),
           ),
           const SizedBox(width: 16),
           Expanded(
