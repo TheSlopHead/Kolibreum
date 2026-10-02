@@ -27,6 +27,27 @@ The desktop interface, book catalog, reading adapters, backups, and recovery CLI
 
 Storage and reading are separate: a missing reading adapter should never prevent a file from being preserved.
 
+## Mobile app
+
+The [Flutter Android app](mobile/README.md) includes an encrypted library, EPUB/FB2 and PDF readers, shelves, bookmarks, and backup/restore. Embedded book covers are extracted locally; books without a cover keep a text cover.
+
+<details>
+<summary>Android · screenshots</summary>
+
+Screens captured from the Flutter app using a temporary demonstration library. The library view includes both an embedded cover and a book without one. New installations start with an empty library.
+
+| Library | Book details | Reader |
+| --- | --- | --- |
+| <img src="mobile/docs/screenshots/library.png" width="240" alt="Android library with embedded and text covers"> | <img src="mobile/docs/screenshots/book-details.png" width="240" alt="Book details with the extracted cover"> | <img src="mobile/docs/screenshots/reader.png" width="240" alt="Paginated EPUB and FB2 reader"> |
+
+| Reading appearance | Locked library |
+| --- | --- |
+| <img src="mobile/docs/screenshots/appearance.png" width="240" alt="Reading mode, page color, text size and line spacing"> | <img src="mobile/docs/screenshots/locked.png" width="240" alt="Unlock screen with private book data hidden"> |
+
+See [mobile setup](mobile/README.md) and [release instructions](mobile/docs/RELEASE.md).
+
+</details>
+
 ## Under the hood
 
 The planned architecture keeps the desktop interface separate from the storage core. The application and recovery CLI will share the same Go packages.
