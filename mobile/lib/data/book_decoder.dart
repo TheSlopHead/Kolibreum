@@ -5,32 +5,7 @@ import 'package:xml/xml.dart';
 import '../domain/book.dart';
 import '../domain/library_repository.dart';
 import 'safe_zip.dart';
-
-XmlDocument _xml(String text) {
-  if (text.length > 8 * 1024 * 1024 ||
-      RegExp(r'<!\s*(DOCTYPE|ENTITY)', caseSensitive: false).hasMatch(text)) {
-    throw const LibraryFailure(
-      'xml',
-      'This book contains unsupported XML declarations or oversized text.',
-    );
-  }
-  final document = XmlDocument.parse(text);
-  int nodes = 0;
-  void inspect(XmlNode node, int depth) {
-    if (depth > 64 || ++nodes > 100000) {
-      throw const LibraryFailure(
-        'limit',
-        'Book structure exceeds reader limits.',
-      );
-    }
-    for (final child in node.children) {
-      inspect(child, depth + 1);
-    }
-  }
-
-  inspect(document, 0);
-  return document;
-}
+import 'book_xml.dart';
 
 Iterable<XmlElement> _elements(XmlNode node, String name) =>
     node.descendants.whereType<XmlElement>().where((e) => e.name.local == name);
@@ -106,7 +81,7 @@ ReaderDocument decodeBook(Uint8List bytes, String format, String fallback) {
 ReaderDocument _decodeBook(Uint8List bytes, String format, String fallback) {
   final budget = _TextBudget();
   if (format == 'FB2') {
-    final xml = _xml(utf8.decode(bytes));
+    final xml = parseBookXml(utf8.decode(bytes));
     final body = _elements(xml, 'body').firstOrNull;
     if (body == null) {
       throw const LibraryFailure('reader', 'FB2 body is missing.');
@@ -171,7 +146,7 @@ ReaderDocument _decodeBook(Uint8List bytes, String format, String fallback) {
     return utf8.decode(file.readBytes()!);
   }
 
-  final container = _xml(entryText('META-INF/container.xml'));
+  final container = parseBookXml(entryText('META-INF/container.xml'));
   final opfPath = _elements(
     container,
     'rootfile',
@@ -179,7 +154,7 @@ ReaderDocument _decodeBook(Uint8List bytes, String format, String fallback) {
   if (opfPath == null) {
     throw const LibraryFailure('epub', 'EPUB package is missing.');
   }
-  final package = _xml(entryText(opfPath));
+  final package = parseBookXml(entryText(opfPath));
   final manifest = {
     for (final e in _elements(package, 'item')) e.getAttribute('id'): e,
   };
@@ -216,7 +191,7 @@ ReaderDocument _decodeBook(Uint8List bytes, String format, String fallback) {
         'Reader text exceeds the supported limit.',
       );
     }
-    final chapter = _xml(text);
+    final chapter = parseBookXml(text);
     final body = _elements(chapter, 'body').firstOrNull;
     if (body == null) continue;
     final paragraphs = budget.paragraphs(
