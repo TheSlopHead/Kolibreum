@@ -46,3 +46,30 @@ func (v *Vault) SaveSnapshot(data []byte) (snapshotID string, err error) {
 	return snapshotID, nil
 
 }
+func (v *Vault) PutSnapshots(data []byte) (snapshotID string, err error) {
+	if v.isLocked {
+		return "", ErrVaultLocked
+	}
+	snapshotID = uuid.New().String()
+	snapshotKey, err := deriveEntityKey(v.masterKey, v.header.VaultID.String(), "snapshot", snapshotID)
+	if err != nil {
+		return "", fmt.Errorf("derive obj key error: %v", err)
+	}
+	aad := []byte("snapshot:" + snapshotID)
+	nonce, ciphertext, err := encrypt(snapshotKey, data, aad)
+	if err != nil {
+		return "", fmt.Errorf("encryption failed: %v", err)
+	}
+	payload := append(nonce, ciphertext...)
+	dir := filepath.Join(v.path, "snapshot", snapshotID[:2])
+	err = os.MkdirAll(dir, 0700)
+	if err != nil {
+		return "", fmt.Errorf("make directory error: %v", err)
+	}
+	snapshotpath := filepath.Join(dir, snapshotID)
+	err = os.WriteFile(snapshotpath, payload, 0600)
+	if err != nil {
+		return "", fmt.Errorf("make directory error: %v", err)
+	}
+	return snapshotID, nil
+}
