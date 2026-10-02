@@ -13,10 +13,14 @@ class Book {
     this.hash = '',
     this.updatedAt = '',
     this.metadataRead = false,
+    this.coverObjectId = '',
+    this.coverChecked = false,
   });
   final String id, title, author, format, objectId, locator, hash, updatedAt;
   final int size;
   final bool metadataRead;
+  final String coverObjectId;
+  final bool coverChecked;
   final double progress;
   final List<String> shelves, bookmarks;
   bool get readable => const ['EPUB', 'FB2', 'PDF'].contains(format);
@@ -43,6 +47,8 @@ class Book {
       bookmarks: List<String>.from(j['bookmarks'] ?? []),
       hash: j['sha256'] as String? ?? '',
       metadataRead: j['metadata_read'] as bool? ?? false,
+      coverObjectId: j['coverobjectid'] as String? ?? '',
+      coverChecked: j['cover_checked'] as bool? ?? false,
     );
   }
   Map<String, dynamic> toJson() => {
@@ -56,6 +62,8 @@ class Book {
     'bookmarks': bookmarks,
     'sha256': hash,
     'metadata_read': metadataRead,
+    'coverobjectid': coverObjectId,
+    'cover_checked': coverChecked,
     'position': {
       'progress': progress,
       'locator': locator,
