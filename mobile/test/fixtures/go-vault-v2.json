@@ -1,0 +1,31 @@
+{
+  "entities": [
+    {
+      "aad": "object:ffeeddcc-bbaa-4988-8766-554433221100",
+      "hkdf_info": "mut:object:ffeeddcc-bbaa-4988-8766-554433221100",
+      "id": "ffeeddcc-bbaa-4988-8766-554433221100",
+      "key": "uDXH/sox4jiepHesctm/Sb+UiyqWYueb2R3QxJCdq8s=",
+      "kind": "object",
+      "payload": "ERITFBUWFxgZGhscHR4fICEiIyQlJicoYBsWH0/8KhD3BQbfVHMTJ4pkcns1a83y2SyoYCfrD19u8bepFwOMgxMQDxTmrqMA5BP0mYMg",
+      "plaintext": "UHJpdmF0ZSBib29rIOKAlCDQn9GA0LjQstC10YIsINC80LjRgC4="
+    },
+    {
+      "aad": "snapshot:ffeeddcc-bbaa-4988-8766-554433221100",
+      "hkdf_info": "mut:snapshot:ffeeddcc-bbaa-4988-8766-554433221100",
+      "id": "ffeeddcc-bbaa-4988-8766-554433221100",
+      "key": "B/f/STqFCVS5ayggZcV+D1PKB0rePN12hvp/zrbhSmk=",
+      "kind": "snapshot",
+      "payload": "ERITFBUWFxgZGhscHR4fICEiIyQlJicoZBkZhcc1Uyovr3mVrbSFgbV4qAlBJkkPvrZdAvjEeCVNX8TVK9SU/67YpP3JKVZRl6A0Ph54",
+      "plaintext": "eyJ2ZXJzaW9uIjoxLCJib29rcyI6e30sInNldHRpbmdzIjp7fX0="
+    }
+  ],
+  "master": "Hx4dHBsaGRgXFhUUExIREA8ODQwLCgkIBwYFBAMCAQA=",
+  "nonce": "ERITFBUWFxgZGhscHR4fICEiIyQlJico",
+  "object_id": "ffeeddcc-bbaa-4988-8766-554433221100",
+  "password": "cross-platform password",
+  "password_key": "ILEbi7Ij69/CaBw25hAVHjJS0VVEt5G35F+E9sKyxhQ=",
+  "salt": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "vault_id": "00112233-4455-4677-8899-aabbccddeeff",
+  "version": 2,
+  "wrapped_master": "WLKxTkBqp1mxPrWtwhHqCpMjUuljZPgTt4libQz5S3rPmK+TF3MSysYxbmZNFcZB"
+}
