@@ -1,6 +1,8 @@
 package catalog
 
 import (
+	"encoding/json"
+	"fmt"
 	"time"
 	"uuid"
 )
@@ -28,4 +30,27 @@ type ReadingPosition struct {
 	Progress float64   `json:"progress"`
 	Locator  string    `json:"locator"`
 	UpdateAt time.Time `json:"updateat"`
+}
+
+func (s *Snapshot) ToBytes() ([]byte, error) {
+	snapshotBytes, err := json.Marshal(s)
+	if err != nil {
+		return nil, fmt.Errorf("cannot return json encoding: %w", err)
+	}
+	return snapshotBytes, nil
+}
+
+func (s *Snapshot) SnapshotFromBytes(data []byte) (*Snapshot, error) {
+	var snapshot Snapshot
+	err := json.Unmarshal(data, &snapshot)
+	if err != nil {
+		return nil, fmt.Errorf("cannot unmarshall data: %w", err)
+	}
+	if s.Books == nil {
+		s.Books = make(map[string]Book)
+	}
+	if s.Shelves == nil {
+		s.Shelves = make([]string, 0)
+	}
+	return &snapshot, nil
 }
